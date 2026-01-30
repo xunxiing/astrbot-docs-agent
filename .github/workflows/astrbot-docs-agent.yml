@@ -1,0 +1,314 @@
+name: AstrBot Docs Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      code_repo:
+        description: "代码仓库（owner/repo），例如 AstrBotDevs/AstrBot"
+        required: true
+        type: string
+      docs_repo:
+        description: "文档仓库（owner/repo），例如 YourOrg/astrbot-docs"
+        required: true
+        type: string
+      pr_number:
+        description: "代码仓库 PR 编号"
+        required: true
+        type: number
+      docs_base_branch:
+        description: "文档仓库 base 分支（留空则自动读取 default_branch）"
+        required: false
+        type: string
+      opencode_model:
+        description: "OpenCode model（provider/model），留空则使用 secret OPENCODE_MODEL 或默认值"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      code_repo:
+        required: true
+        type: string
+      docs_repo:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: number
+      docs_base_branch:
+        required: false
+        type: string
+      opencode_model:
+        required: false
+        type: string
+    secrets:
+      GH_APP_ID:
+        required: true
+      GH_APP_PRIVATE_KEY:
+        required: true
+      OPENCODE_BASE_URL:
+        required: true
+      MY_API_KEY:
+        required: true
+      OPENCODE_MODEL:
+        required: false
+
+concurrency:
+  group: astrbot-docs-agent-${{ inputs.code_repo }}-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  generate-docs-pr:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve inputs
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CODE_REPO="${{ inputs.code_repo }}"
+          DOCS_REPO="${{ inputs.docs_repo }}"
+          PR_NUMBER="${{ inputs.pr_number }}"
+          DOCS_BASE_BRANCH="${{ inputs.docs_base_branch }}"
+          OPENCODE_MODEL_INPUT="${{ inputs.opencode_model }}"
+
+          code_owner="${CODE_REPO%%/*}"
+          code_name="${CODE_REPO##*/}"
+          docs_owner="${DOCS_REPO%%/*}"
+          docs_name="${DOCS_REPO##*/}"
+
+          echo "code_repo=$CODE_REPO" >> "$GITHUB_OUTPUT"
+          echo "docs_repo=$DOCS_REPO" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "code_owner=$code_owner" >> "$GITHUB_OUTPUT"
+          echo "code_name=$code_name" >> "$GITHUB_OUTPUT"
+          echo "docs_owner=$docs_owner" >> "$GITHUB_OUTPUT"
+          echo "docs_name=$docs_name" >> "$GITHUB_OUTPUT"
+          echo "docs_base_branch=$DOCS_BASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "opencode_model_input=$OPENCODE_MODEL_INPUT" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub App token (code repo)
+        id: token_code
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ steps.vars.outputs.code_owner }}
+          repositories: ${{ steps.vars.outputs.code_name }}
+
+      - name: Create GitHub App token (docs repo)
+        id: token_docs
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ steps.vars.outputs.docs_owner }}
+          repositories: ${{ steps.vars.outputs.docs_name }}
+
+      - name: Checkout docs repo (base)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.vars.outputs.docs_repo }}
+          token: ${{ steps.token_docs.outputs.token }}
+          path: docs
+          fetch-depth: 0
+
+      - name: Build PR context bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.token_code.outputs.token }}
+          CODE_REPO: ${{ steps.vars.outputs.code_repo }}
+          PR_NUMBER: ${{ steps.vars.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+
+          mkdir -p docs/.opencode
+
+          gh pr view "$PR_NUMBER" --repo "$CODE_REPO" --json \
+            number,title,body,url,author,createdAt,updatedAt,baseRefName,headRefName,additions,deletions,changedFiles,labels,files \
+            > docs/.opencode/pr.json
+
+          {
+            echo "# PR Context"
+            echo
+            echo "- Repo: $CODE_REPO"
+            echo "- PR: #$PR_NUMBER"
+            echo
+            echo "## Title"
+            jq -r '.title' docs/.opencode/pr.json
+            echo
+            echo "## Author"
+            jq -r '.author.login // ""' docs/.opencode/pr.json
+            echo
+            echo "## URL"
+            jq -r '.url' docs/.opencode/pr.json
+            echo
+            echo "## Description (Body)"
+            jq -r '.body // ""' docs/.opencode/pr.json
+            echo
+            echo "## Labels"
+            jq -r '[.labels[].name] | join(", ")' docs/.opencode/pr.json
+            echo
+            echo "## Files"
+            jq -r '.files[].path' docs/.opencode/pr.json
+            echo
+            echo "## Diff (truncated)"
+            echo '```diff'
+            gh pr diff "$PR_NUMBER" --repo "$CODE_REPO" --patch --color never | head -n 5000
+            echo '```'
+          } > docs/.opencode/pr_context.md
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install opencode (npm)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --version
+          npm install -g opencode
+          opencode --version || true
+
+      - name: Write opencode.json (openai-compatible provider)
+        shell: bash
+        env:
+          OPENCODE_BASE_URL: ${{ secrets.OPENCODE_BASE_URL }}
+          MY_API_KEY: ${{ secrets.MY_API_KEY }}
+          OPENCODE_MODEL_SECRET: ${{ secrets.OPENCODE_MODEL }}
+          OPENCODE_MODEL_INPUT: ${{ steps.vars.outputs.opencode_model_input }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${OPENCODE_MODEL_INPUT:-}" ]]; then
+            OPENCODE_MODEL="${OPENCODE_MODEL_INPUT}"
+          elif [[ -n "${OPENCODE_MODEL_SECRET:-}" ]]; then
+            OPENCODE_MODEL="${OPENCODE_MODEL_SECRET}"
+          else
+            OPENCODE_MODEL="my-thirdparty/my-model"
+          fi
+
+          cat > docs/opencode.json <<JSON
+          {
+            "\$schema": "https://opencode.ai/config.json",
+            "provider": {
+              "my-thirdparty": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "My ThirdParty",
+                "options": {
+                  "baseURL": "${OPENCODE_BASE_URL}",
+                  "apiKey": "{env:MY_API_KEY}"
+                },
+                "models": {
+                  "my-model": {
+                    "name": "My Large Model"
+                  }
+                }
+              }
+            },
+            "model": "${OPENCODE_MODEL}"
+          }
+          JSON
+
+      - name: Run OpenCode to update docs
+        shell: bash
+        env:
+          MY_API_KEY: ${{ secrets.MY_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          pushd docs >/dev/null
+
+          PROMPT=$'你是一个严谨的文档维护者。\n\n你将收到一份来自代码仓库 PR 的上下文（标题、描述、改动文件列表、diff 截断）。\n请在当前文档仓库中：\n1) 找到最合适的文档位置并更新（或新增）Markdown 文档来覆盖此次 PR 的用户可见变更。\n2) 如果仓库存在 changelog / release notes / 版本记录，请补充一条对应内容。\n3) 避免臆测：仅根据上下文与仓库现有内容输出；若信息不足，请在文档中注明 TODO/待确认点，而不是编造。\n4) 只修改文档仓库内的文档内容（例如 *.md/*.mdx），不要改 CI、脚本、依赖。\n\n输出以“直接修改文件”的方式完成（在仓库里落地改动），不要只给建议。'
+
+          opencode run -f .opencode/pr_context.md "$PROMPT"
+
+          popd >/dev/null
+
+      - name: Create/Update docs PR
+        id: docs_pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.token_docs.outputs.token }}
+          DOCS_REPO: ${{ steps.vars.outputs.docs_repo }}
+          CODE_REPO: ${{ steps.vars.outputs.code_repo }}
+          PR_NUMBER: ${{ steps.vars.outputs.pr_number }}
+          DOCS_BASE_BRANCH_INPUT: ${{ steps.vars.outputs.docs_base_branch }}
+        run: |
+          set -euo pipefail
+
+          cd docs
+
+          if [[ -n "${DOCS_BASE_BRANCH_INPUT:-}" ]]; then
+            BASE_BRANCH="$DOCS_BASE_BRANCH_INPUT"
+          else
+            BASE_BRANCH="$(gh api "repos/$DOCS_REPO" --jq .default_branch)"
+          fi
+
+          git config user.name "astrbot-docs-agent[bot]"
+          git config user.email "astrbot-docs-agent[bot]@users.noreply.github.com"
+
+          git checkout "$BASE_BRANCH"
+          git pull --ff-only
+
+          BRANCH="docs-agent/astrbot-pr-${PR_NUMBER}"
+          git checkout -B "$BRANCH"
+
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+            echo "base=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
+            echo "No docs changes; skipping PR create."
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "docs: update for ${CODE_REPO}#${PR_NUMBER}"
+          git push --force --set-upstream origin "$BRANCH"
+
+          existing_url="$(gh pr list --repo "$DOCS_REPO" --head "$BRANCH" --json url --jq '.[0].url // \"\"')"
+          if [[ -n "$existing_url" ]]; then
+            echo "url=$existing_url" >> "$GITHUB_OUTPUT"
+            echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+            echo "base=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          title="Docs: ${CODE_REPO}#${PR_NUMBER}"
+          body=$'由 astrbot-docs-agent 自动生成。\n\n- 上游 PR: https://github.com/'"${CODE_REPO}"$'/pull/'"${PR_NUMBER}"$'\n\n请人工审核后合并。'
+
+          url="$(gh pr create --repo "$DOCS_REPO" --base "$BASE_BRANCH" --head "$BRANCH" --title "$title" --body "$body")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Reply on code PR with docs PR link
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.token_code.outputs.token }}
+          CODE_REPO: ${{ steps.vars.outputs.code_repo }}
+          PR_NUMBER: ${{ steps.vars.outputs.pr_number }}
+          DOCS_PR_URL: ${{ steps.docs_pr.outputs.url }}
+          DOCS_REPO: ${{ steps.vars.outputs.docs_repo }}
+          DOCS_BRANCH: ${{ steps.docs_pr.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${DOCS_PR_URL:-}" ]]; then
+            msg=$'已为该 PR 生成文档更新 PR（待人工审核）：\n'"${DOCS_PR_URL}"
+          else
+            msg=$'本次运行未生成文档变更（文档仓库无改动）。\n'"Docs repo: ${DOCS_REPO}\nBranch: ${DOCS_BRANCH}"
+          fi
+
+          gh pr comment "$PR_NUMBER" --repo "$CODE_REPO" --body "$msg"

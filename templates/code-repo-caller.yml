@@ -1,0 +1,34 @@
+name: AstrBot Docs Agent (caller)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+  workflow_dispatch:
+    inputs:
+      code_repo:
+        description: "代码仓库（owner/repo）。默认使用当前仓库"
+        required: false
+        type: string
+      docs_repo:
+        description: "文档仓库（owner/repo）"
+        required: true
+        type: string
+      pr_number:
+        description: "代码仓库 PR 编号（手动触发时必填）"
+        required: false
+        type: number
+
+jobs:
+  call-docs-agent:
+    uses: <OWNER>/<THIS_REPO>/.github/workflows/astrbot-docs-agent.yml@main
+    with:
+      code_repo: ${{ inputs.code_repo || github.repository }}
+      docs_repo: ${{ inputs.docs_repo }}
+      pr_number: ${{ inputs.pr_number || github.event.pull_request.number }}
+    secrets:
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      OPENCODE_BASE_URL: ${{ secrets.OPENCODE_BASE_URL }}
+      MY_API_KEY: ${{ secrets.MY_API_KEY }}
+      OPENCODE_MODEL: ${{ secrets.OPENCODE_MODEL }}
+

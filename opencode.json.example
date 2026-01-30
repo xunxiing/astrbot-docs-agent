@@ -1,0 +1,20 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "my-thirdparty": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "My ThirdParty",
+      "options": {
+        "baseURL": "{env:OPENCODE_BASE_URL}",
+        "apiKey": "{env:MY_API_KEY}"
+      },
+      "models": {
+        "my-model": {
+          "name": "My Large Model"
+        }
+      }
+    }
+  },
+  "model": "my-thirdparty/my-model"
+}
+
