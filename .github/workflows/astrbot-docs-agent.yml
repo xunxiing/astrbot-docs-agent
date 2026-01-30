@@ -177,7 +177,7 @@ jobs:
         run: |
           set -euo pipefail
           npm --version
-          npm install -g opencode
+          npm install -g opencode-ai@1.1.45
           opencode --version || true
 
       - name: Write opencode.json (openai-compatible provider)

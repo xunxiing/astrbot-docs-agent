@@ -10,7 +10,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci || npm install
 
 # opencode 通过 npm 安装（按你的需求：不随仓库提交）
-RUN npm install -g opencode
+RUN npm install -g opencode-ai@1.1.45
 
 COPY tsconfig.json ./
 COPY src ./src
