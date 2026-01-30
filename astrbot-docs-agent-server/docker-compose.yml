@@ -1,0 +1,14 @@
+services:
+  astrbot-docs-agent:
+    build: .
+    container_name: astrbot-docs-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-8787}:8787"
+    volumes:
+      # 用于缓存临时 git clone / 产物，重启后可复用
+      - ./data:/data
+      # 可选：挂载 GitHub App 私钥文件
+      - ./secrets:/secrets:ro
