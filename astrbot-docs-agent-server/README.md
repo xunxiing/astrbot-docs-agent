@@ -51,6 +51,8 @@ Webhook：
 - `MY_API_KEY`：第三方 API key
 - `OPENCODE_PROVIDER_ID`：openai-compatible provider id（随便起一个名字，默认 `my-thirdparty`）
 - `OPENCODE_MODEL`：模型标识（推荐直接填“模型 ID”，例如 `kimi-k2.5`；也支持 `provider/model`）
+- `OPENCODE_API_URL`：（可选）如果你的服务不是标准 OpenAI `/v1`，可直接指定完整的 `.../chat/completions` URL
+- `OPENCODE_VARIANT`：OpenCode 变体（默认 `minimal`，用于避免某些服务在 thinking 模式下要求 `reasoning_content` 导致报错）
 - `MAX_CONCURRENT_JOBS`：并发处理 PR 的数量（建议 `1`）
 - `MAX_QUEUE_SIZE`：队列长度上限（防止短时间 webhook 风暴拖垮 VPS）
 - `JOB_TIMEOUT_SECONDS`：单个任务超时（超过会强杀 `opencode`/`git` 子进程）

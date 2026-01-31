@@ -58,19 +58,18 @@ export async function generateDocsForPr(params) {
         return { providerId: params.opencode.providerId, modelId: raw };
     };
     const { providerId, modelId } = resolveModel();
+    const baseUrlNormalized = params.opencode.baseUrl.trim().replace(/\/$/, "");
+    const apiUrl = (params.opencode.apiUrl && params.opencode.apiUrl.trim()) || undefined;
     // Prefer writing a project `opencode.json` so OpenCode loads it via normal config resolution
     // (this also ensures `{env:...}` placeholders are expanded and schema parsing matches upstream behavior).
     const projectOpencodeJson = {
         $schema: "https://opencode.ai/config.json",
-        // NOTE: Provider.api is used by opencode internally to set the model's API URL.
-        // For OpenAI-compatible endpoints, this is typically `${baseURL}/chat/completions`.
         provider: {
             [providerId]: {
                 npm: "@ai-sdk/openai-compatible",
                 name: providerId,
-                api: `${params.opencode.baseUrl.replace(/\/$/, "")}/chat/completions`,
                 options: {
-                    baseURL: params.opencode.baseUrl,
+                    baseURL: baseUrlNormalized,
                     apiKey: "{env:MY_API_KEY}"
                 },
                 models: {
@@ -80,6 +79,11 @@ export async function generateDocsForPr(params) {
         },
         model: `${providerId}/${modelId}`
     };
+    // Some providers don't follow the standard {baseURL}/v1 path; allow overriding the full API URL.
+    if (apiUrl) {
+        // @ts-expect-error - optional field supported by opencode config schema (Provider.api)
+        projectOpencodeJson.provider[providerId].api = apiUrl;
+    }
     await writeFile(path.join(checkoutDir, "opencode.json"), JSON.stringify(projectOpencodeJson, null, 2), "utf-8");
     // Debug snapshot (do NOT include secrets)
     const opencodeConfigDebug = {
@@ -88,9 +92,9 @@ export async function generateDocsForPr(params) {
             [providerId]: {
                 npm: "@ai-sdk/openai-compatible",
                 name: providerId,
-                api: projectOpencodeJson.provider[providerId].api,
                 options: {
-                    baseURL: params.opencode.baseUrl
+                    baseURL: baseUrlNormalized,
+                    ...(apiUrl ? { apiUrl } : {})
                 },
                 models: {
                     [modelId]: { name: modelId }
@@ -114,12 +118,12 @@ export async function generateDocsForPr(params) {
     ].join("\n");
     const opencodeRun = await run("opencode", 
     // yargs 的 `--file/-f` 是 array，会吞掉后续参数；用 `--` 把 prompt 强制放到 args["--"] 里
-    ["run", "--model", `${providerId}/${modelId}`, "-f", ".opencode/pr_context.md", "--", prompt], {
+    ["run", "--model", `${providerId}/${modelId}`, "--variant", params.opencode.variant, "-f", ".opencode/pr_context.md", "--", prompt], {
         cwd: checkoutDir,
         timeoutMs: params.timeoutMs,
         env: {
             MY_API_KEY: params.opencode.apiKey,
-            OPENCODE_BASE_URL: params.opencode.baseUrl
+            OPENCODE_BASE_URL: baseUrlNormalized
         }
     });
     if (opencodeRun.code !== 0)

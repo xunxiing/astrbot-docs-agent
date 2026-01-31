@@ -33,6 +33,11 @@ export const env = {
   // - If OPENCODE_MODEL has no "/", it's treated as model id and combined with OPENCODE_PROVIDER_ID
   opencodeProviderId: optional("OPENCODE_PROVIDER_ID") ?? "my-thirdparty",
   opencodeModelRaw: optional("OPENCODE_MODEL") ?? "my-model",
+  // Optional: override the full OpenAI-compatible chat/completions URL if your provider doesn't follow /v1.
+  // Example: https://api.xxx.com/v1/chat/completions
+  opencodeApiUrl: optional("OPENCODE_API_URL"),
+  // OpenCode run variant. Use "minimal" to avoid providers that require reasoning_content when thinking is enabled.
+  opencodeVariant: optional("OPENCODE_VARIANT") ?? "minimal",
 
   dataDir: optional("DATA_DIR") ?? "/data",
 

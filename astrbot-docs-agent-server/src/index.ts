@@ -191,7 +191,9 @@ async function processPullRequest(repoFull: string, prNumber: number) {
       baseUrl: env.opencodeBaseUrl,
       apiKey: env.myApiKey,
       providerId: env.opencodeProviderId,
-      modelRaw: env.opencodeModelRaw
+      modelRaw: env.opencodeModelRaw,
+      apiUrl: env.opencodeApiUrl,
+      variant: env.opencodeVariant
     }
   })
 
