@@ -231,7 +231,8 @@ jobs:
 
           PROMPT=$'你是一个严谨的文档维护者。\n\n你将收到一份来自代码仓库 PR 的上下文（标题、描述、改动文件列表、diff 截断）。\n请在当前文档仓库中：\n1) 找到最合适的文档位置并更新（或新增）Markdown 文档来覆盖此次 PR 的用户可见变更。\n2) 如果仓库存在 changelog / release notes / 版本记录，请补充一条对应内容。\n3) 避免臆测：仅根据上下文与仓库现有内容输出；若信息不足，请在文档中注明 TODO/待确认点，而不是编造。\n4) 只修改文档仓库内的文档内容（例如 *.md/*.mdx），不要改 CI、脚本、依赖。\n\n输出以“直接修改文件”的方式完成（在仓库里落地改动），不要只给建议。'
 
-          opencode run -f .opencode/pr_context.md "$PROMPT"
+          # yargs 的 `--file/-f` 是 array，会吞掉后续参数；用 `--` 把 prompt 放到 args["--"] 里
+          opencode run -f .opencode/pr_context.md -- "$PROMPT"
 
           popd >/dev/null
 

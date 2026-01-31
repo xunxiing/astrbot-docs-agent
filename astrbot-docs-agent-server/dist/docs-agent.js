@@ -75,7 +75,9 @@ export async function generateDocsForPr(params) {
         "",
         "输出以“直接修改文件”的方式完成（在仓库里落地改动），不要只给建议。"
     ].join("\n");
-    const opencodeRun = await run("opencode", ["run", "-f", ".opencode/pr_context.md", prompt], {
+    const opencodeRun = await run("opencode", 
+    // yargs 的 `--file/-f` 是 array，会吞掉后续参数；用 `--` 把 prompt 强制放到 args["--"] 里
+    ["run", "-f", ".opencode/pr_context.md", "--", prompt], {
         cwd: checkoutDir,
         timeoutMs: params.timeoutMs,
         env: {

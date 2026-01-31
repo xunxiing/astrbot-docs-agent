@@ -105,7 +105,8 @@ export async function generateDocsForPr(params: {
 
   const opencodeRun = await run(
     "opencode",
-    ["run", "-f", ".opencode/pr_context.md", prompt],
+    // yargs 的 `--file/-f` 是 array，会吞掉后续参数；用 `--` 把 prompt 强制放到 args["--"] 里
+    ["run", "-f", ".opencode/pr_context.md", "--", prompt],
     {
       cwd: checkoutDir,
       timeoutMs: params.timeoutMs,
