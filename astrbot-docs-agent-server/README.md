@@ -50,6 +50,10 @@ Webhook：
 - `OPENCODE_BASE_URL`：第三方 OpenAI-compatible `https://.../v1`
 - `MY_API_KEY`：第三方 API key
 - `OPENCODE_MODEL`：（可选）`provider/model`，默认 `my-thirdparty/my-model`
+- `MAX_CONCURRENT_JOBS`：并发处理 PR 的数量（建议 `1`）
+- `MAX_QUEUE_SIZE`：队列长度上限（防止短时间 webhook 风暴拖垮 VPS）
+- `JOB_TIMEOUT_SECONDS`：单个任务超时（超过会强杀 `opencode`/`git` 子进程）
+- `MAX_PATCH_LINES`：发送给 agent 的 patch 最大行数（过大会显著增加 CPU/内存/费用）
 
 ### 私钥换行怎么填（建议方式）
 
@@ -73,13 +77,19 @@ GITHUB_APP_PRIVATE_KEY_FILE=/secrets/app.private-key.pem
 ```bash
 cd astrbot-docs-agent-server
 cp .env.example .env
-docker compose up -d --build
+docker compose up -d
 ```
 
 健康检查：
 
 ```bash
 curl http://127.0.0.1:8787/healthz
+```
+
+队列观察（可选）：
+
+```bash
+curl http://127.0.0.1:8787/queue
 ```
 
 ## 5) 反代 / HTTPS（推荐）

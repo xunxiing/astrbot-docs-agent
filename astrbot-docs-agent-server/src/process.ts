@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process"
 
-export async function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
+export async function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}
+) {
   return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd: opts.cwd,
@@ -12,7 +16,22 @@ export async function run(cmd: string, args: string[], opts: { cwd?: string; env
     child.stdout.on("data", (d) => (stdout += d.toString()))
     child.stderr.on("data", (d) => (stderr += d.toString()))
     child.on("error", reject)
-    child.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }))
+
+    const timeoutMs = opts.timeoutMs ?? 0
+    let timeout: NodeJS.Timeout | undefined
+    if (timeoutMs > 0) {
+      timeout = setTimeout(() => {
+        try {
+          child.kill("SIGKILL")
+        } catch {
+          // ignore
+        }
+      }, timeoutMs)
+    }
+
+    child.on("close", (code) => {
+      if (timeout) clearTimeout(timeout)
+      resolve({ code: code ?? 0, stdout, stderr })
+    })
   })
 }
-

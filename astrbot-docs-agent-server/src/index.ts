@@ -7,6 +7,39 @@ import { commitAndPushDocsBranch, generateDocsForPr } from "./docs-agent.js"
 
 const log = createLogger(env.logLevel as any)
 
+type Job = { key: string; startedAt?: number; run: () => Promise<void> }
+
+const pending = new Map<string, Job>()
+const inflight = new Set<string>()
+let running = 0
+
+function enqueue(job: Job) {
+  if (inflight.has(job.key)) return { ok: true, deduped: true }
+  if (pending.has(job.key)) pending.delete(job.key) // move to end (newest wins)
+  if (!pending.has(job.key) && pending.size >= env.maxQueueSize) return { ok: false, reason: "queue_full" as const }
+  pending.set(job.key, job)
+  pump()
+  return { ok: true, deduped: false }
+}
+
+function pump() {
+  while (running < env.maxConcurrentJobs && pending.size > 0) {
+    const [key, job] = pending.entries().next().value as [string, Job]
+    pending.delete(key)
+    inflight.add(key)
+    running += 1
+    job.startedAt = Date.now()
+    void job
+      .run()
+      .catch((e) => log.error("Job failed", { key, err: String(e?.message ?? e) }))
+      .finally(() => {
+        running -= 1
+        inflight.delete(key)
+        pump()
+      })
+  }
+}
+
 function parseRepo(full: string): { owner: string; repo: string } {
   const [owner, repo] = full.split("/", 2)
   if (!owner || !repo) throw new Error(`Invalid repo: ${full}`)
@@ -73,7 +106,33 @@ async function handlePullRequest(event: any) {
     return
   }
 
-  log.info("PR event received", { repo: repoFull, prNumber, action: event.payload.action })
+  const action = event.payload.action as string
+  log.info("PR event received", { repo: repoFull, prNumber, action })
+
+  const key = `${repoFull}#${prNumber}`
+  const enq = enqueue({
+    key,
+    run: async () => {
+      const start = Date.now()
+      log.info("Job start", { key })
+      try {
+        await processPullRequest(repoFull, prNumber)
+      } finally {
+        log.info("Job done", { key, ms: Date.now() - start })
+      }
+    }
+  })
+
+  if (!enq.ok) {
+    log.warn("Queue full; dropping event", { key })
+    return
+  }
+  if (enq.deduped) log.info("Deduped event (already running)", { key })
+  else log.info("Enqueued job", { key, pending: pending.size, running })
+}
+
+async function processPullRequest(repoFull: string, prNumber: number) {
+  const timeoutMs = Math.max(1, env.jobTimeoutSeconds) * 1000
 
   const { owner: codeOwner, repo: codeName } = parseRepo(env.codeRepo)
   const { owner: docsOwner, repo: docsName } = parseRepo(env.docsRepo)
@@ -114,7 +173,7 @@ async function handlePullRequest(event: any) {
     mediaType: { format: "patch" }
   })
 
-  const patch = truncateLines(String(patchResp.data ?? ""), 5000)
+  const patch = truncateLines(String(patchResp.data ?? ""), env.maxPatchLines)
 
   const runRes = await generateDocsForPr({
     docsRepo: env.docsRepo,
@@ -127,6 +186,7 @@ async function handlePullRequest(event: any) {
     prFiles,
     prPatch: patch,
     dataDir: env.dataDir,
+    timeoutMs,
     opencode: {
       baseUrl: env.opencodeBaseUrl,
       apiKey: env.myApiKey,
@@ -154,7 +214,8 @@ async function handlePullRequest(event: any) {
     checkoutDir: runRes.checkoutDir,
     baseBranch,
     branch,
-    commitMessage: `docs: update for ${env.codeRepo}#${prNumber}`
+    commitMessage: `docs: update for ${env.codeRepo}#${prNumber}`,
+    timeoutMs
   })
 
   const docsPrUrl = await ensureDocsPr({
@@ -180,6 +241,15 @@ async function handlePullRequest(event: any) {
 const app = express()
 
 app.get("/healthz", (_req, res) => res.status(200).send("ok"))
+app.get("/queue", (_req, res) => {
+  res.json({
+    running,
+    inflight: [...inflight.values()],
+    pending: [...pending.keys()],
+    maxConcurrentJobs: env.maxConcurrentJobs,
+    maxQueueSize: env.maxQueueSize
+  })
+})
 
 // Keep raw body for signature verification
 app.post(

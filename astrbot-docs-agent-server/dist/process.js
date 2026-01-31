@@ -11,6 +11,22 @@ export async function run(cmd, args, opts = {}) {
         child.stdout.on("data", (d) => (stdout += d.toString()));
         child.stderr.on("data", (d) => (stderr += d.toString()));
         child.on("error", reject);
-        child.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
+        const timeoutMs = opts.timeoutMs ?? 0;
+        let timeout;
+        if (timeoutMs > 0) {
+            timeout = setTimeout(() => {
+                try {
+                    child.kill("SIGKILL");
+                }
+                catch {
+                    // ignore
+                }
+            }, timeoutMs);
+        }
+        child.on("close", (code) => {
+            if (timeout)
+                clearTimeout(timeout);
+            resolve({ code: code ?? 0, stdout, stderr });
+        });
     });
 }

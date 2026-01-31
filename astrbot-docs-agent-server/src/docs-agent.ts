@@ -23,6 +23,7 @@ export async function generateDocsForPr(params: {
   prFiles: string[]
   prPatch: string
   dataDir: string
+  timeoutMs: number
   opencode: {
     baseUrl: string
     apiKey: string
@@ -39,7 +40,7 @@ export async function generateDocsForPr(params: {
 
   const cloneUrl = toAuthGitUrl(params.docsToken, params.docsRepo)
 
-  const clone = await run("git", ["clone", "--depth=1", cloneUrl, checkoutDir])
+  const clone = await run("git", ["clone", "--depth=1", cloneUrl, checkoutDir], { timeoutMs: params.timeoutMs })
   if (clone.code !== 0) throw new Error(`git clone failed: ${clone.stderr}`)
 
   await mkdir(path.join(checkoutDir, ".opencode"), { recursive: true })
@@ -107,6 +108,7 @@ export async function generateDocsForPr(params: {
     ["run", "-f", ".opencode/pr_context.md", prompt],
     {
       cwd: checkoutDir,
+      timeoutMs: params.timeoutMs,
       env: {
         MY_API_KEY: params.opencode.apiKey,
         OPENCODE_BASE_URL: params.opencode.baseUrl,
@@ -116,7 +118,7 @@ export async function generateDocsForPr(params: {
   )
   if (opencodeRun.code !== 0) throw new Error(`opencode failed: ${opencodeRun.stderr || opencodeRun.stdout}`)
 
-  const status = await run("git", ["status", "--porcelain=v1"], { cwd: checkoutDir })
+  const status = await run("git", ["status", "--porcelain=v1"], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (status.code !== 0) throw new Error(`git status failed: ${status.stderr}`)
 
   const changed = status.stdout.trim().length > 0
@@ -130,42 +132,50 @@ export async function commitAndPushDocsBranch(params: {
   baseBranch: string
   branch: string
   commitMessage: string
+  timeoutMs: number
 }) {
   const originUrl = toAuthGitUrl(params.docsToken, params.docsRepo)
 
-  const setUser = await run("git", ["config", "user.name", "astrbot-docs-agent[bot]"], { cwd: params.checkoutDir })
+  const setUser = await run("git", ["config", "user.name", "astrbot-docs-agent[bot]"], {
+    cwd: params.checkoutDir,
+    timeoutMs: params.timeoutMs
+  })
   if (setUser.code !== 0) throw new Error(setUser.stderr)
   const setEmail = await run("git", ["config", "user.email", "astrbot-docs-agent[bot]@users.noreply.github.com"], {
-    cwd: params.checkoutDir
+    cwd: params.checkoutDir,
+    timeoutMs: params.timeoutMs
   })
   if (setEmail.code !== 0) throw new Error(setEmail.stderr)
 
   // Ensure origin uses token
-  const setOrigin = await run("git", ["remote", "set-url", "origin", originUrl], { cwd: params.checkoutDir })
+  const setOrigin = await run("git", ["remote", "set-url", "origin", originUrl], {
+    cwd: params.checkoutDir,
+    timeoutMs: params.timeoutMs
+  })
   if (setOrigin.code !== 0) throw new Error(setOrigin.stderr)
 
   // Fetch base and create branch
-  const fetch = await run("git", ["fetch", "origin", params.baseBranch], { cwd: params.checkoutDir })
+  const fetch = await run("git", ["fetch", "origin", params.baseBranch], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (fetch.code !== 0) throw new Error(fetch.stderr)
 
-  const checkoutBase = await run("git", ["checkout", params.baseBranch], { cwd: params.checkoutDir })
+  const checkoutBase = await run("git", ["checkout", params.baseBranch], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (checkoutBase.code !== 0) throw new Error(checkoutBase.stderr)
 
-  const resetBase = await run("git", ["reset", "--hard", `origin/${params.baseBranch}`], { cwd: params.checkoutDir })
+  const resetBase = await run("git", ["reset", "--hard", `origin/${params.baseBranch}`], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (resetBase.code !== 0) throw new Error(resetBase.stderr)
 
-  const checkoutBranch = await run("git", ["checkout", "-B", params.branch], { cwd: params.checkoutDir })
+  const checkoutBranch = await run("git", ["checkout", "-B", params.branch], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (checkoutBranch.code !== 0) throw new Error(checkoutBranch.stderr)
 
-  const add = await run("git", ["add", "-A"], { cwd: params.checkoutDir })
+  const add = await run("git", ["add", "-A"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (add.code !== 0) throw new Error(add.stderr)
 
-  const commit = await run("git", ["commit", "-m", params.commitMessage], { cwd: params.checkoutDir })
+  const commit = await run("git", ["commit", "-m", params.commitMessage], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (commit.code !== 0) throw new Error(commit.stderr)
 
   const push = await run("git", ["push", "--force", "--set-upstream", "origin", params.branch], {
-    cwd: params.checkoutDir
+    cwd: params.checkoutDir,
+    timeoutMs: params.timeoutMs
   })
   if (push.code !== 0) throw new Error(push.stderr)
 }
-

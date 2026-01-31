@@ -25,5 +25,10 @@ export const env = {
     opencodeBaseUrl: required("OPENCODE_BASE_URL"),
     myApiKey: required("MY_API_KEY"),
     opencodeModel: optional("OPENCODE_MODEL") ?? "my-thirdparty/my-model",
-    dataDir: optional("DATA_DIR") ?? "/data"
+    dataDir: optional("DATA_DIR") ?? "/data",
+    // Controls to prevent VPS overload
+    maxConcurrentJobs: Number(optional("MAX_CONCURRENT_JOBS") ?? "1"),
+    maxQueueSize: Number(optional("MAX_QUEUE_SIZE") ?? "10"),
+    jobTimeoutSeconds: Number(optional("JOB_TIMEOUT_SECONDS") ?? "900"),
+    maxPatchLines: Number(optional("MAX_PATCH_LINES") ?? "1200")
 };
