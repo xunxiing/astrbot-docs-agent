@@ -81,15 +81,16 @@ export async function generateDocsForPr(params) {
         model: `${providerId}/${modelId}`
     };
     await writeFile(path.join(checkoutDir, "opencode.json"), JSON.stringify(projectOpencodeJson, null, 2), "utf-8");
-    const opencodeConfig = {
+    // Debug snapshot (do NOT include secrets)
+    const opencodeConfigDebug = {
         $schema: "https://opencode.ai/config.json",
         provider: {
             [providerId]: {
                 npm: "@ai-sdk/openai-compatible",
                 name: providerId,
+                api: projectOpencodeJson.provider[providerId].api,
                 options: {
-                    baseURL: "{env:OPENCODE_BASE_URL}",
-                    apiKey: "{env:MY_API_KEY}"
+                    baseURL: params.opencode.baseUrl
                 },
                 models: {
                     [modelId]: { name: modelId }
@@ -98,7 +99,7 @@ export async function generateDocsForPr(params) {
         },
         model: `${providerId}/${modelId}`
     };
-    await writeFile(path.join(checkoutDir, ".opencode", "opencode_config.json"), JSON.stringify(opencodeConfig, null, 2), "utf-8");
+    await writeFile(path.join(checkoutDir, ".opencode", "opencode_config.json"), JSON.stringify(opencodeConfigDebug, null, 2), "utf-8");
     const prompt = [
         "你是一个严谨的文档维护者。",
         "",
@@ -113,14 +114,12 @@ export async function generateDocsForPr(params) {
     ].join("\n");
     const opencodeRun = await run("opencode", 
     // yargs 的 `--file/-f` 是 array，会吞掉后续参数；用 `--` 把 prompt 强制放到 args["--"] 里
-    ["run", "-f", ".opencode/pr_context.md", "--", prompt], {
+    ["run", "--model", `${providerId}/${modelId}`, "-f", ".opencode/pr_context.md", "--", prompt], {
         cwd: checkoutDir,
         timeoutMs: params.timeoutMs,
         env: {
             MY_API_KEY: params.opencode.apiKey,
-            OPENCODE_BASE_URL: params.opencode.baseUrl,
-            // Keep OPENCODE_CONFIG_CONTENT as a fallback override, but the primary source should be opencode.json.
-            OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig)
+            OPENCODE_BASE_URL: params.opencode.baseUrl
         }
     });
     if (opencodeRun.code !== 0)
