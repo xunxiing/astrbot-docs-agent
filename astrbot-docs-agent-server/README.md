@@ -49,7 +49,8 @@ Webhook：
 - `DOCS_REPO`：文档仓库 `owner/repo`
 - `OPENCODE_BASE_URL`：第三方 OpenAI-compatible `https://.../v1`
 - `MY_API_KEY`：第三方 API key
-- `OPENCODE_MODEL`：（可选）`provider/model`，默认 `my-thirdparty/my-model`
+- `OPENCODE_PROVIDER_ID`：openai-compatible provider id（随便起一个名字，默认 `my-thirdparty`）
+- `OPENCODE_MODEL`：模型标识（推荐直接填“模型 ID”，例如 `kimi-k2.5`；也支持 `provider/model`）
 - `MAX_CONCURRENT_JOBS`：并发处理 PR 的数量（建议 `1`）
 - `MAX_QUEUE_SIZE`：队列长度上限（防止短时间 webhook 风暴拖垮 VPS）
 - `JOB_TIMEOUT_SECONDS`：单个任务超时（超过会强杀 `opencode`/`git` 子进程）

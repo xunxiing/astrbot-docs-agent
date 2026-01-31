@@ -28,7 +28,11 @@ export const env = {
 
   opencodeBaseUrl: required("OPENCODE_BASE_URL"),
   myApiKey: required("MY_API_KEY"),
-  opencodeModel: optional("OPENCODE_MODEL") ?? "my-thirdparty/my-model",
+  // OpenCode model resolution:
+  // - If OPENCODE_MODEL contains "/", it's treated as provider/model
+  // - If OPENCODE_MODEL has no "/", it's treated as model id and combined with OPENCODE_PROVIDER_ID
+  opencodeProviderId: optional("OPENCODE_PROVIDER_ID") ?? "my-thirdparty",
+  opencodeModelRaw: optional("OPENCODE_MODEL") ?? "my-model",
 
   dataDir: optional("DATA_DIR") ?? "/data",
 

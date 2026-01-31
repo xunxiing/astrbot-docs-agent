@@ -27,7 +27,8 @@ export async function generateDocsForPr(params: {
   opencode: {
     baseUrl: string
     apiKey: string
-    model: string
+    providerId: string
+    modelRaw: string
   }
 }) {
   const { owner: docsOwner, repo: docsName } = parseRepo(params.docsRepo)
@@ -72,23 +73,67 @@ export async function generateDocsForPr(params: {
 
   await writeFile(path.join(checkoutDir, ".opencode", "pr_context.md"), contextMd, "utf-8")
 
+  const resolveModel = () => {
+    const raw = params.opencode.modelRaw.trim()
+    if (raw.includes("/")) {
+      const [providerId, modelId] = raw.split("/", 2)
+      if (!providerId || !modelId) throw new Error(`Invalid OPENCODE_MODEL: "${raw}" (expected provider/model)`)
+      return { providerId, modelId }
+    }
+    // Treat as model id
+    return { providerId: params.opencode.providerId, modelId: raw }
+  }
+
+  const { providerId, modelId } = resolveModel()
+
+  // Prefer writing a project `opencode.json` so OpenCode loads it via normal config resolution
+  // (this also ensures `{env:...}` placeholders are expanded and schema parsing matches upstream behavior).
+  const projectOpencodeJson = {
+    $schema: "https://opencode.ai/config.json",
+    // NOTE: Provider.api is used by opencode internally to set the model's API URL.
+    // For OpenAI-compatible endpoints, this is typically `${baseURL}/chat/completions`.
+    provider: {
+      [providerId]: {
+        npm: "@ai-sdk/openai-compatible",
+        name: providerId,
+        api: `${params.opencode.baseUrl.replace(/\/$/, "")}/chat/completions`,
+        options: {
+          baseURL: params.opencode.baseUrl,
+          apiKey: "{env:MY_API_KEY}"
+        },
+        models: {
+          [modelId]: { name: modelId }
+        }
+      }
+    },
+    model: `${providerId}/${modelId}`
+  }
+
+  await writeFile(path.join(checkoutDir, "opencode.json"), JSON.stringify(projectOpencodeJson, null, 2), "utf-8")
+
   const opencodeConfig = {
     $schema: "https://opencode.ai/config.json",
     provider: {
-      "my-thirdparty": {
+      [providerId]: {
         npm: "@ai-sdk/openai-compatible",
-        name: "My ThirdParty",
+        name: providerId,
         options: {
           baseURL: "{env:OPENCODE_BASE_URL}",
           apiKey: "{env:MY_API_KEY}"
         },
         models: {
-          "my-model": { name: "My Large Model" }
+          [modelId]: { name: modelId }
         }
       }
     },
-    model: params.opencode.model
+    model: `${providerId}/${modelId}`
   }
+
+  await writeFile(
+    path.join(checkoutDir, ".opencode", "opencode_config.json"),
+    JSON.stringify(opencodeConfig, null, 2),
+    "utf-8"
+  )
 
   const prompt = [
     "你是一个严谨的文档维护者。",
@@ -113,6 +158,7 @@ export async function generateDocsForPr(params: {
       env: {
         MY_API_KEY: params.opencode.apiKey,
         OPENCODE_BASE_URL: params.opencode.baseUrl,
+        // Keep OPENCODE_CONFIG_CONTENT as a fallback override, but the primary source should be opencode.json.
         OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig)
       }
     }
