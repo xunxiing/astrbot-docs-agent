@@ -63,6 +63,10 @@ export async function generateDocsForPr(params: {
   const resetBase = await run("git", ["reset", "--hard", `origin/${params.baseBranch}`], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (resetBase.code !== 0) throw new Error(`git reset failed: ${resetBase.stderr || resetBase.stdout}`)
 
+  // Remove untracked artifacts from previous runs (eg .opencode/, opencode.json, logs, etc).
+  const clean = await run("git", ["clean", "-fdx"], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
+  if (clean.code !== 0) throw new Error(`git clean failed: ${clean.stderr || clean.stdout}`)
+
   const checkoutBranch = await run("git", ["checkout", "-B", params.branch], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (checkoutBranch.code !== 0) throw new Error(`git checkout -B failed: ${checkoutBranch.stderr || checkoutBranch.stdout}`)
 
@@ -191,7 +195,17 @@ export async function generateDocsForPr(params: {
   const status = await run("git", ["status", "--porcelain=v1"], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (status.code !== 0) throw new Error(`git status failed: ${status.stderr}`)
 
-  const changed = status.stdout.trim().length > 0
+  const changed = status.stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .some((l) => {
+      // porcelain: XY <path> (also handles rename: XY old -> new)
+      const parts = l.split(/\s+/)
+      const p = parts.slice(1).join(" ")
+      const pathPart = p.includes("->") ? p.split("->").pop()!.trim() : p.trim()
+      return pathPart.endsWith(".md") || pathPart.endsWith(".mdx")
+    })
   return { checkoutDir, workRoot, changed }
 }
 
@@ -223,19 +237,26 @@ export async function commitAndPushDocsBranch(params: {
   })
   if (setOrigin.code !== 0) throw new Error(setOrigin.stderr)
 
-  const add = await run("git", ["add", "-A"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
+  // Only stage docs changes; avoid committing runtime/config artifacts.
+  const add = await run("git", ["add", "-A", "--", "*.md", "*.mdx"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (add.code !== 0) throw new Error(add.stderr)
 
   // Safety: never include opencode runtime files even if they exist in the docs repo.
-  await run("git", ["reset", "--", "opencode.json", ".opencode", "docs.md", "content.md"], {
+  await run("git", ["reset", "--", "opencode.json", ".opencode", "content.md"], {
     cwd: params.checkoutDir,
     timeoutMs: params.timeoutMs
   })
   // Also revert them in the working tree to avoid leaving the checkout dirty (ignore errors if paths don't exist).
-  await run("git", ["checkout", "--", "opencode.json", ".opencode", "docs.md", "content.md"], {
+  await run("git", ["checkout", "--", "opencode.json", ".opencode", "content.md"], {
     cwd: params.checkoutDir,
     timeoutMs: params.timeoutMs
   }).catch(() => undefined)
+
+  const staged = await run("git", ["diff", "--cached", "--name-only"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
+  if (staged.code !== 0) throw new Error(staged.stderr || staged.stdout)
+  if (staged.stdout.trim().length === 0) {
+    throw new Error("No staged docs changes (agent may have only edited non-doc files or produced placeholders).")
+  }
 
   const commit = await run("git", ["commit", "-m", params.commitMessage], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (commit.code !== 0) throw new Error(commit.stderr || commit.stdout)
