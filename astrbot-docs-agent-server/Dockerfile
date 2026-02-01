@@ -18,6 +18,9 @@ COPY src ./src
 RUN npm run build
 RUN npm prune --omit=dev
 
+# Fail-fast: ensure runtime deps exist in the image
+RUN git --version && opencode --version
+
 ENV NODE_ENV=production
 ENV PORT=8787
 

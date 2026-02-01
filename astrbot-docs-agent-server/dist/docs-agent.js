@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { run } from "./process.js";
 function parseRepo(full) {
@@ -18,8 +18,21 @@ export async function generateDocsForPr(params) {
     // Keep the previous checkout dir if it exists; this allows re-runs without re-downloading everything.
     // We still reset git to the correct branch below.
     const cloneUrl = toAuthGitUrl(params.docsToken, params.docsRepo);
-    const ensureRepo = await run("git", ["rev-parse", "--is-inside-work-tree"], { cwd: checkoutDir, timeoutMs: params.timeoutMs });
-    if (ensureRepo.code !== 0) {
+    const isDir = await stat(checkoutDir)
+        .then((s) => s.isDirectory())
+        .catch(() => false);
+    const ensureRepoOk = await (async () => {
+        if (!isDir)
+            return false;
+        try {
+            const r = await run("git", ["rev-parse", "--is-inside-work-tree"], { cwd: checkoutDir, timeoutMs: params.timeoutMs });
+            return r.code === 0;
+        }
+        catch {
+            return false;
+        }
+    })();
+    if (!ensureRepoOk) {
         const clone = await run("git", ["clone", "--depth=1", cloneUrl, checkoutDir], { timeoutMs: params.timeoutMs });
         if (clone.code !== 0)
             throw new Error(`git clone failed: ${clone.stderr || clone.stdout}`);
