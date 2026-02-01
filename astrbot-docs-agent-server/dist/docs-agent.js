@@ -188,8 +188,9 @@ export async function commitAndPushDocsBranch(params) {
     });
     if (setOrigin.code !== 0)
         throw new Error(setOrigin.stderr);
-    // Only stage docs changes; avoid committing runtime/config artifacts.
-    const add = await run("git", ["add", "-A", "--", "*.md", "*.mdx"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
+    // Stage everything first, then unstage known runtime/garbage files.
+    // (Using pathspec globs like "*.mdx" can fail when there are no matches.)
+    const add = await run("git", ["add", "-A"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
     if (add.code !== 0)
         throw new Error(add.stderr);
     // Safety: never include opencode runtime files even if they exist in the docs repo.
@@ -205,9 +206,13 @@ export async function commitAndPushDocsBranch(params) {
     const staged = await run("git", ["diff", "--cached", "--name-only"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
     if (staged.code !== 0)
         throw new Error(staged.stderr || staged.stdout);
-    if (staged.stdout.trim().length === 0) {
-        throw new Error("No staged docs changes (agent may have only edited non-doc files or produced placeholders).");
-    }
+    const stagedPaths = staged.stdout
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+    const stagedDocPaths = stagedPaths.filter((p) => p.endsWith(".md") || p.endsWith(".mdx"));
+    if (stagedDocPaths.length === 0)
+        throw new Error("No staged docs changes (only non-doc files changed after cleanup).");
     const commit = await run("git", ["commit", "-m", params.commitMessage], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
     if (commit.code !== 0)
         throw new Error(commit.stderr || commit.stdout);
