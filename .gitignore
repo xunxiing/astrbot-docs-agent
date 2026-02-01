@@ -3,7 +3,7 @@ node_modules/
 
 # Ignore build directories
 /build/
-/dist/
+dist/
 
 # Ignore IDE specific files
 .idea/
