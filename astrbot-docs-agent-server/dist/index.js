@@ -151,9 +151,13 @@ async function processPullRequest(repoFull, prNumber) {
         mediaType: { format: "patch" }
     });
     const patch = truncateLines(String(patchResp.data ?? ""), env.maxPatchLines);
+    const baseBranch = await getDefaultBranch(docsInst.octokit, docsOwner, docsName);
+    const branch = `docs-agent/${codeOwner}-${codeName}-pr-${prNumber}`;
     const runRes = await generateDocsForPr({
         docsRepo: env.docsRepo,
         docsToken: docsInst.token,
+        baseBranch,
+        branch,
         codeRepo: repoFull,
         prNumber,
         prTitle: pr.data.title ?? "",
@@ -182,13 +186,10 @@ async function processPullRequest(repoFull, prNumber) {
         });
         return;
     }
-    const baseBranch = await getDefaultBranch(docsInst.octokit, docsOwner, docsName);
-    const branch = `docs-agent/${codeOwner}-${codeName}-pr-${prNumber}`;
     await commitAndPushDocsBranch({
         docsRepo: env.docsRepo,
         docsToken: docsInst.token,
         checkoutDir: runRes.checkoutDir,
-        baseBranch,
         branch,
         commitMessage: `docs: update for ${repoFull}#${prNumber}`,
         timeoutMs

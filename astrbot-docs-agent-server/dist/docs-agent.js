@@ -20,6 +20,19 @@ export async function generateDocsForPr(params) {
     const clone = await run("git", ["clone", "--depth=1", cloneUrl, checkoutDir], { timeoutMs: params.timeoutMs });
     if (clone.code !== 0)
         throw new Error(`git clone failed: ${clone.stderr}`);
+    // Ensure we're on the correct base branch BEFORE running opencode (otherwise later reset/checkout would drop changes).
+    const fetchBase = await run("git", ["fetch", "origin", params.baseBranch], { cwd: checkoutDir, timeoutMs: params.timeoutMs });
+    if (fetchBase.code !== 0)
+        throw new Error(`git fetch failed: ${fetchBase.stderr || fetchBase.stdout}`);
+    const checkoutBase = await run("git", ["checkout", params.baseBranch], { cwd: checkoutDir, timeoutMs: params.timeoutMs });
+    if (checkoutBase.code !== 0)
+        throw new Error(`git checkout failed: ${checkoutBase.stderr || checkoutBase.stdout}`);
+    const resetBase = await run("git", ["reset", "--hard", `origin/${params.baseBranch}`], { cwd: checkoutDir, timeoutMs: params.timeoutMs });
+    if (resetBase.code !== 0)
+        throw new Error(`git reset failed: ${resetBase.stderr || resetBase.stdout}`);
+    const checkoutBranch = await run("git", ["checkout", "-B", params.branch], { cwd: checkoutDir, timeoutMs: params.timeoutMs });
+    if (checkoutBranch.code !== 0)
+        throw new Error(`git checkout -B failed: ${checkoutBranch.stderr || checkoutBranch.stdout}`);
     await mkdir(path.join(checkoutDir, ".opencode"), { recursive: true });
     const contextMd = [
         "# PR Context",
@@ -163,19 +176,6 @@ export async function commitAndPushDocsBranch(params) {
     });
     if (setOrigin.code !== 0)
         throw new Error(setOrigin.stderr);
-    // Fetch base and create branch
-    const fetch = await run("git", ["fetch", "origin", params.baseBranch], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
-    if (fetch.code !== 0)
-        throw new Error(fetch.stderr);
-    const checkoutBase = await run("git", ["checkout", params.baseBranch], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
-    if (checkoutBase.code !== 0)
-        throw new Error(checkoutBase.stderr);
-    const resetBase = await run("git", ["reset", "--hard", `origin/${params.baseBranch}`], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
-    if (resetBase.code !== 0)
-        throw new Error(resetBase.stderr);
-    const checkoutBranch = await run("git", ["checkout", "-B", params.branch], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
-    if (checkoutBranch.code !== 0)
-        throw new Error(checkoutBranch.stderr);
     const add = await run("git", ["add", "-A"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
     if (add.code !== 0)
         throw new Error(add.stderr);
@@ -183,7 +183,7 @@ export async function commitAndPushDocsBranch(params) {
     await run("git", ["reset", "--", "opencode.json", ".opencode"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
     const commit = await run("git", ["commit", "-m", params.commitMessage], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs });
     if (commit.code !== 0)
-        throw new Error(commit.stderr);
+        throw new Error(commit.stderr || commit.stdout);
     const push = await run("git", ["push", "--force", "--set-upstream", "origin", params.branch], {
         cwd: params.checkoutDir,
         timeoutMs: params.timeoutMs
