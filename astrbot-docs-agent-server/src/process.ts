@@ -9,10 +9,37 @@ const FALLBACK_BIN: Record<string, string[]> = {
 export async function run(
   cmd: string,
   args: string[],
-  opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void } = {}
+  opts: {
+    cwd?: string
+    env?: NodeJS.ProcessEnv
+    timeoutMs?: number
+    onStdout?: (chunk: string) => void
+    onStderr?: (chunk: string) => void
+    /**
+     * Keep at most this many characters of stdout/stderr in memory (tail).
+     * This prevents large subprocess outputs (e.g. opencode) from exhausting memory.
+     *
+     * Can be overridden via env `PROCESS_MAX_CAPTURE_CHARS` (default 200000).
+     */
+    maxCaptureChars?: number
+  } = {}
 ) {
   return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
     const fullEnv = { ...process.env, ...opts.env }
+
+    const defaultMaxCaptureChars = (() => {
+      const raw = process.env.PROCESS_MAX_CAPTURE_CHARS
+      const n = raw ? Number(raw) : NaN
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 200_000
+    })()
+    const maxCaptureChars = opts.maxCaptureChars ?? defaultMaxCaptureChars
+
+    const appendCapped = (current: string, chunk: string) => {
+      if (maxCaptureChars <= 0) return current
+      const next = current + chunk
+      if (next.length <= maxCaptureChars) return next
+      return next.slice(-maxCaptureChars)
+    }
 
     const spawnOnce = (command: string) =>
       spawn(command, args, {
@@ -24,16 +51,19 @@ export async function run(
     let child = spawnOnce(cmd)
     let stdout = ""
     let stderr = ""
-    child.stdout.on("data", (d) => {
-      const s = d.toString()
-      stdout += s
-      opts.onStdout?.(s)
-    })
-    child.stderr.on("data", (d) => {
-      const s = d.toString()
-      stderr += s
-      opts.onStderr?.(s)
-    })
+    const attach = () => {
+      child.stdout.on("data", (d) => {
+        const s = d.toString()
+        stdout = appendCapped(stdout, s)
+        opts.onStdout?.(s)
+      })
+      child.stderr.on("data", (d) => {
+        const s = d.toString()
+        stderr = appendCapped(stderr, s)
+        opts.onStderr?.(s)
+      })
+    }
+    attach()
 
     let retried = false
     child.on("error", (err: any) => {
@@ -43,16 +73,7 @@ export async function run(
         if (fallback) {
           retried = true
           child = spawnOnce(fallback)
-          child.stdout.on("data", (d) => {
-            const s = d.toString()
-            stdout += s
-            opts.onStdout?.(s)
-          })
-          child.stderr.on("data", (d) => {
-            const s = d.toString()
-            stderr += s
-            opts.onStderr?.(s)
-          })
+          attach()
           child.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }))
           child.on("error", reject)
           return

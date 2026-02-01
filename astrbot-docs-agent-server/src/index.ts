@@ -118,7 +118,23 @@ async function handlePullRequest(event: any) {
       const start = Date.now()
       log.info("Job start", { key })
       try {
+        const m0 = process.memoryUsage()
+        log.info("Job memory (start)", {
+          key,
+          rss: m0.rss,
+          heapUsed: m0.heapUsed,
+          heapTotal: m0.heapTotal,
+          external: m0.external
+        })
         await processPullRequest(repoFull, prNumber)
+        const m1 = process.memoryUsage()
+        log.info("Job memory (end)", {
+          key,
+          rss: m1.rss,
+          heapUsed: m1.heapUsed,
+          heapTotal: m1.heapTotal,
+          external: m1.external
+        })
       } finally {
         log.info("Job done", { key, ms: Date.now() - start })
       }
