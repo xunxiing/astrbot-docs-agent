@@ -3,7 +3,7 @@ import { spawn } from "node:child_process"
 export async function run(
   cmd: string,
   args: string[],
-  opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void } = {}
 ) {
   return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(cmd, args, {
@@ -13,8 +13,16 @@ export async function run(
     })
     let stdout = ""
     let stderr = ""
-    child.stdout.on("data", (d) => (stdout += d.toString()))
-    child.stderr.on("data", (d) => (stderr += d.toString()))
+    child.stdout.on("data", (d) => {
+      const s = d.toString()
+      stdout += s
+      opts.onStdout?.(s)
+    })
+    child.stderr.on("data", (d) => {
+      const s = d.toString()
+      stderr += s
+      opts.onStderr?.(s)
+    })
     child.on("error", reject)
 
     const timeoutMs = opts.timeoutMs ?? 0

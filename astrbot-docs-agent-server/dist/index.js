@@ -167,6 +167,7 @@ async function processPullRequest(repoFull, prNumber) {
         prPatch: patch,
         dataDir: env.dataDir,
         timeoutMs,
+        logOpencode: env.logOpencode || env.logLevel === "debug",
         opencode: {
             baseUrl: env.opencodeBaseUrl,
             apiKey: env.myApiKey,

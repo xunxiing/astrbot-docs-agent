@@ -42,6 +42,8 @@ export const env = {
     opencodeApiUrl: optional("OPENCODE_API_URL"),
     // OpenCode run variant. Use "minimal" to avoid providers that require reasoning_content when thinking is enabled.
     opencodeVariant: optional("OPENCODE_VARIANT") ?? "minimal",
+    // Debug: stream opencode stdout/stderr into server logs (can be noisy).
+    logOpencode: optional("LOG_OPENCODE") === "1" || optional("LOG_OPENCODE") === "true",
     dataDir: optional("DATA_DIR") ?? "/data",
     // Controls to prevent VPS overload
     maxConcurrentJobs: Number(optional("MAX_CONCURRENT_JOBS") ?? "1"),
