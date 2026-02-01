@@ -285,5 +285,6 @@ app.post(
 
 app.listen(env.port, "0.0.0.0", () => {
   log.info(`Listening on :${env.port}`)
+  log.info("Allowlisted code repos", { codeRepos: env.codeRepos, docsRepo: env.docsRepo })
 })
 
