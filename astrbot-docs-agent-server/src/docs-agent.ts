@@ -83,9 +83,6 @@ export async function generateDocsForPr(params: {
   const checkoutBranch = await run("git", ["checkout", "-B", params.branch], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (checkoutBranch.code !== 0) throw new Error(`git checkout -B failed: ${checkoutBranch.stderr || checkoutBranch.stdout}`)
 
-  const runtimeDir = path.join(workRoot, "runtime")
-  await mkdir(runtimeDir, { recursive: true })
-
   const contextMd = [
     "# PR Context",
     "",
@@ -111,7 +108,12 @@ export async function generateDocsForPr(params: {
     ""
   ].join("\n")
 
-  const prContextPath = path.join(runtimeDir, "pr_context.md")
+  // Keep context/config inside the repo worktree to avoid OpenCode permission prompts for external directories.
+  // These files are untracked and will not be committed (commit step explicitly unstages runtime artifacts).
+  const opencodeDir = path.join(checkoutDir, ".opencode")
+  await mkdir(opencodeDir, { recursive: true })
+
+  const prContextPath = path.join(opencodeDir, "pr_context.md")
   await writeFile(prContextPath, contextMd, "utf-8")
 
   const resolveModel = () => {
@@ -155,7 +157,7 @@ export async function generateDocsForPr(params: {
     runtimeOpencodeConfig.provider[providerId].api = apiUrl
   }
 
-  const opencodeConfigPath = path.join(runtimeDir, "opencode.runtime.json")
+  const opencodeConfigPath = path.join(opencodeDir, "opencode.runtime.json")
   await writeFile(opencodeConfigPath, JSON.stringify(runtimeOpencodeConfig, null, 2), "utf-8")
 
   const prompt = [
