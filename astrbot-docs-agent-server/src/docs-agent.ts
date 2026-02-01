@@ -153,6 +153,7 @@ export async function generateDocsForPr(params: {
     "2) 如果仓库存在 changelog / release notes / 版本记录，请补充一条对应内容。",
     "3) 避免臆测：仅根据上下文与仓库现有内容输出；若信息不足，请在文档中注明 TODO/待确认点，而不是编造。",
     "4) 只修改文档仓库内的文档内容（例如 *.md/*.mdx），不要改 CI、脚本、依赖。",
+    "5) 不要提交/新增 opencode 的运行产物：不要创建或修改 `opencode.json`、`.opencode/` 目录、`docs.md`、`content.md` 这类占位文件。",
     "",
     "输出以“直接修改文件”的方式完成（在仓库里落地改动），不要只给建议。"
   ].join("\n")
@@ -171,6 +172,14 @@ export async function generateDocsForPr(params: {
     }
   )
   if (opencodeRun.code !== 0) throw new Error(`opencode failed: ${opencodeRun.stderr || opencodeRun.stdout}`)
+
+  // Cleanup runtime-only files so they never get committed to docs repo PRs.
+  // (We still keep them on disk in /data/runs for debugging if needed, but not in git history.)
+  await rm(path.join(checkoutDir, ".opencode"), { recursive: true, force: true })
+  await rm(path.join(checkoutDir, "opencode.json"), { force: true })
+  // Defensive cleanup: prevent common placeholder artifacts from being committed.
+  await rm(path.join(checkoutDir, "docs.md"), { force: true })
+  await rm(path.join(checkoutDir, "content.md"), { force: true })
 
   const status = await run("git", ["status", "--porcelain=v1"], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (status.code !== 0) throw new Error(`git status failed: ${status.stderr}`)
@@ -223,6 +232,9 @@ export async function commitAndPushDocsBranch(params: {
 
   const add = await run("git", ["add", "-A"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (add.code !== 0) throw new Error(add.stderr)
+
+  // Safety: never include opencode runtime files even if they exist.
+  await run("git", ["reset", "--", "opencode.json", ".opencode"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
 
   const commit = await run("git", ["commit", "-m", params.commitMessage], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (commit.code !== 0) throw new Error(commit.stderr)

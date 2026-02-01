@@ -107,7 +107,7 @@ GitHub webhook 更推荐 HTTPS。最省心的是给 VPS 绑一个域名，然后
 
 ## 4) 工作方式（服务做了什么）
 
-- 收到 `pull_request` 的 `opened/reopened/synchronize/edited` 事件
+- 收到 `pull_request` 的 `opened/reopened/synchronize/edited` 事件（来自 `CODE_REPO` / `CODE_REPOS`）
 - 通过 GitHub App installation token 调用 GitHub API：
   - 获取 PR 信息与文件列表
   - 拉取 PR patch（截断）

@@ -101,8 +101,10 @@ async function handlePullRequest(event: any) {
     return
   }
 
-  if (repoFull !== env.codeRepo) {
-    log.warn("Ignored repo (not allowlisted)", { repoFull, allow: env.codeRepo })
+  if (!env.codeRepos.includes(repoFull)) {
+    // GitHub App webhooks fire for every installed repo. It's normal to receive events from DOCS_REPO too.
+    if (repoFull === env.docsRepo) log.info("Ignored docs repo event", { repoFull })
+    else log.warn("Ignored repo (not allowlisted)", { repoFull, allow: env.codeRepos })
     return
   }
 
@@ -134,7 +136,7 @@ async function handlePullRequest(event: any) {
 async function processPullRequest(repoFull: string, prNumber: number) {
   const timeoutMs = Math.max(1, env.jobTimeoutSeconds) * 1000
 
-  const { owner: codeOwner, repo: codeName } = parseRepo(env.codeRepo)
+  const { owner: codeOwner, repo: codeName } = parseRepo(repoFull)
   const { owner: docsOwner, repo: docsName } = parseRepo(env.docsRepo)
 
   const codeInst = await createInstallationOctokit({
@@ -178,7 +180,7 @@ async function processPullRequest(repoFull: string, prNumber: number) {
   const runRes = await generateDocsForPr({
     docsRepo: env.docsRepo,
     docsToken: docsInst.token,
-    codeRepo: env.codeRepo,
+    codeRepo: repoFull,
     prNumber,
     prTitle: pr.data.title ?? "",
     prBody: pr.data.body ?? "",
@@ -217,7 +219,7 @@ async function processPullRequest(repoFull: string, prNumber: number) {
     checkoutDir: runRes.checkoutDir,
     baseBranch,
     branch,
-    commitMessage: `docs: update for ${env.codeRepo}#${prNumber}`,
+    commitMessage: `docs: update for ${repoFull}#${prNumber}`,
     timeoutMs
   })
 
@@ -227,8 +229,8 @@ async function processPullRequest(repoFull: string, prNumber: number) {
     docsRepo: docsName,
     head: branch,
     base: baseBranch,
-    title: `Docs: ${env.codeRepo}#${prNumber}`,
-    body: `由 astrbot-docs-agent-server 自动生成。\n\n- 上游 PR: https://github.com/${env.codeRepo}/pull/${prNumber}\n\n请人工审核后合并。`
+    title: `Docs: ${repoFull}#${prNumber}`,
+    body: `由 astrbot-docs-agent-server 自动生成。\n\n- 上游 PR: https://github.com/${repoFull}/pull/${prNumber}\n\n请人工审核后合并。`
   })
 
   await codeInst.octokit.issues.createComment({

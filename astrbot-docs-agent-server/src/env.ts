@@ -23,7 +23,15 @@ export const env = {
   })(),
   githubWebhookSecret: required("GITHUB_WEBHOOK_SECRET"),
 
-  codeRepo: required("CODE_REPO"),
+  // One or more code repos that can trigger jobs.
+  // Prefer CODE_REPOS="owner1/repo1,owner2/repo2" if you want multiple.
+  codeRepos: (() => {
+    const raw = optional("CODE_REPOS") ?? required("CODE_REPO")
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  })(),
   docsRepo: required("DOCS_REPO"),
 
   opencodeBaseUrl: required("OPENCODE_BASE_URL"),
