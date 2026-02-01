@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises"
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { run } from "./process.js"
 
@@ -115,6 +115,8 @@ export async function generateDocsForPr(params: {
 
   const prContextPath = path.join(opencodeDir, "pr_context.md")
   await writeFile(prContextPath, contextMd, "utf-8")
+  const summaryPath = "/tmp/docs_update_summary.md"
+  await writeFile(summaryPath, "", "utf-8").catch(() => undefined)
 
   const resolveModel = () => {
     const raw = params.opencode.modelRaw.trim()
@@ -184,6 +186,17 @@ export async function generateDocsForPr(params: {
     }
   }
 
+  // Keep OpenCode's XDG storage inside the repo checkout to avoid interactive `external_directory` prompts.
+  const opencodeHome = path.join(opencodeDir, "home")
+  const xdgDataHome = path.join(opencodeHome, ".local", "share")
+  const xdgCacheHome = path.join(opencodeHome, ".cache")
+  const xdgConfigHome = path.join(opencodeHome, ".config")
+  const xdgStateHome = path.join(opencodeHome, ".local", "state")
+  await mkdir(xdgDataHome, { recursive: true })
+  await mkdir(xdgCacheHome, { recursive: true })
+  await mkdir(xdgConfigHome, { recursive: true })
+  await mkdir(xdgStateHome, { recursive: true })
+
   const opencodeRun = await run(
     "opencode",
     // yargs 的 `--file/-f` 是 array，会吞掉后续参数；用 `--` 把 prompt 强制放到 args["--"] 里
@@ -195,7 +208,14 @@ export async function generateDocsForPr(params: {
         MY_API_KEY: params.opencode.apiKey,
         OPENCODE_BASE_URL: baseUrlNormalized,
         OPENCODE_CONFIG: opencodeConfigPath,
-        OPENCODE_DISABLE_PROJECT_CONFIG: "true"
+        OPENCODE_DISABLE_PROJECT_CONFIG: "true",
+        HOME: opencodeHome,
+        XDG_DATA_HOME: xdgDataHome,
+        XDG_CACHE_HOME: xdgCacheHome,
+        XDG_CONFIG_HOME: xdgConfigHome,
+        XDG_STATE_HOME: xdgStateHome,
+        // Allow OpenCode to write the summary file to /tmp without blocking on an interactive permission prompt.
+        OPENCODE_PERMISSION: JSON.stringify({ external_directory: { "/tmp*": "allow" } })
       },
       ...(params.logOpencode
         ? {
@@ -221,7 +241,8 @@ export async function generateDocsForPr(params: {
       const pathPart = p.includes("->") ? p.split("->").pop()!.trim() : p.trim()
       return pathPart.endsWith(".md") || pathPart.endsWith(".mdx")
     })
-  return { checkoutDir, workRoot, changed }
+  const summary = await readFile(summaryPath, "utf-8").catch(() => "")
+  return { checkoutDir, workRoot, changed, summary: summary.trim() }
 }
 
 export async function commitAndPushDocsBranch(params: {

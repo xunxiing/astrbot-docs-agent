@@ -211,7 +211,20 @@ async function processPullRequest(repoFull: string, prNumber: number) {
       owner: codeOwner,
       repo: codeName,
       issue_number: prNumber,
-      body: `本次运行未生成文档变更（文档仓库无改动）。\n\nDocs repo: ${env.docsRepo}`
+      body: [
+        "本次运行未生成文档变更（文档仓库无改动）。",
+        "",
+        `Docs repo: ${env.docsRepo}`,
+        ...(runRes.summary
+          ? [
+              "",
+              "---",
+              "AI 改动摘要（未提交，仅供参考）：",
+              "",
+              runRes.summary.length > 3500 ? `${runRes.summary.slice(0, 3500)}\n\n(…truncated)` : runRes.summary
+            ]
+          : [])
+      ].join("\n")
     })
     return
   }
@@ -232,14 +245,41 @@ async function processPullRequest(repoFull: string, prNumber: number) {
     head: branch,
     base: baseBranch,
     title: `Docs: ${repoFull}#${prNumber}`,
-    body: `由 astrbot-docs-agent-server 自动生成。\n\n- 上游 PR: https://github.com/${repoFull}/pull/${prNumber}\n\n请人工审核后合并。`
+    body: [
+      "由 astrbot-docs-agent-server 自动生成。",
+      "",
+      `- 上游 PR: https://github.com/${repoFull}/pull/${prNumber}`,
+      ...(runRes.summary
+        ? [
+            "",
+            "---",
+            "AI 改动摘要：",
+            "",
+            runRes.summary.length > 5000 ? `${runRes.summary.slice(0, 5000)}\n\n(…truncated)` : runRes.summary
+          ]
+        : []),
+      "",
+      "请人工审核后合并。"
+    ].join("\n")
   })
 
   await codeInst.octokit.issues.createComment({
     owner: codeOwner,
     repo: codeName,
     issue_number: prNumber,
-    body: `已为该 PR 生成文档更新 PR（待人工审核）：\n${docsPrUrl}`
+    body: [
+      "已为该 PR 生成文档更新 PR（待人工审核）：",
+      docsPrUrl,
+      ...(runRes.summary
+        ? [
+            "",
+            "---",
+            "AI 改动摘要：",
+            "",
+            runRes.summary.length > 3500 ? `${runRes.summary.slice(0, 3500)}\n\n(…truncated)` : runRes.summary
+          ]
+        : [])
+    ].join("\n")
   })
 
   log.info("Done", { prNumber, docsPrUrl })
@@ -287,4 +327,3 @@ app.listen(env.port, "0.0.0.0", () => {
   log.info(`Listening on :${env.port}`)
   log.info("Allowlisted code repos", { codeRepos: env.codeRepos, docsRepo: env.docsRepo })
 })
-
