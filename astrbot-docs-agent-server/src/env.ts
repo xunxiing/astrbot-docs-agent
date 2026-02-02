@@ -42,9 +42,14 @@ export const env = {
     if (!v) throw new Error("Missing env: LLM_API_KEY (or MY_API_KEY / GEMINI_API_KEY)")
     return v
   })(),
-  llmBaseUrl: (optional("OPENAI_BASE_URL") ?? optional("LLM_BASE_URL") ?? optional("OPENCODE_BASE_URL") ?? "https://api.openai.com/v1")
-    .trim()
-    .replace(/\/$/, ""),
+  llmBaseUrl: (() => {
+    const provider = (optional("LLM_PROVIDER") ?? "openai-compatible") as "openai-compatible" | "gemini"
+    const raw =
+      provider === "gemini"
+        ? optional("GEMINI_BASE_URL") ?? optional("LLM_BASE_URL")
+        : optional("OPENAI_BASE_URL") ?? optional("LLM_BASE_URL") ?? optional("OPENCODE_BASE_URL") ?? "https://api.openai.com/v1"
+    return (raw ?? "").trim().replace(/\/$/, "")
+  })(),
   llmModel: (() => {
     const provider = (optional("LLM_PROVIDER") ?? "openai-compatible") as "openai-compatible" | "gemini"
     const raw =

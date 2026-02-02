@@ -215,7 +215,7 @@ async function processPullRequest(repoFull: string, prNumber: number) {
       provider: env.llmProvider,
       apiKey: env.llmApiKey,
       model: env.llmModel,
-      baseUrl: env.llmProvider === "openai-compatible" ? env.llmBaseUrl : undefined,
+      baseUrl: env.llmBaseUrl || undefined,
       temperature: env.llmTemperature
     }
   })

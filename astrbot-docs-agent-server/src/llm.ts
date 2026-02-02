@@ -7,7 +7,7 @@ export type LlmConfig = {
   provider: LlmProvider
   apiKey: string
   model: string
-  /** OpenAI-compatible base URL, e.g. https://api.openai.com/v1 or https://your-newapi/v1 */
+  /** Provider base URL (optional). For OpenAI-compatible usually ends with `/v1`. For Gemini it overrides the default Google endpoint. */
   baseUrl?: string
   temperature?: number
 }
@@ -20,7 +20,8 @@ export function createChatModel(cfg: LlmConfig) {
     return new ChatGoogleGenerativeAI({
       apiKey: cfg.apiKey,
       model: cfg.model,
-      temperature
+      temperature,
+      ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {})
     } as any)
   }
 
@@ -32,4 +33,3 @@ export function createChatModel(cfg: LlmConfig) {
   if (cfg.baseUrl) options.configuration = { baseURL: cfg.baseUrl }
   return new ChatOpenAI(options)
 }
-
