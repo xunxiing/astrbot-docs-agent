@@ -1,6 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages"
 import { createRepoTools } from "./repo-tools.js"
 import { createChatModel, type LlmConfig } from "./llm.js"
+import { runGeminiDocsUpdateAgent } from "./gemini-agent.js"
 
 type ToolCall = { id?: string; name: string; args: unknown }
 
@@ -44,6 +45,21 @@ export async function runDocsUpdateAgent(params: {
   log?: (line: string) => void
   maxSteps?: number
 }) {
+  if (params.llm.provider === "gemini") {
+    // Use the official Gemini format (v1beta generateContent) to preserve thought signatures for tool calls.
+    return await runGeminiDocsUpdateAgent({
+      repoRoot: params.repoRoot,
+      apiKey: params.llm.apiKey,
+      model: params.llm.model,
+      baseUrl: params.llm.baseUrl,
+      apiVersion: process.env.GEMINI_API_VERSION || "v1beta",
+      temperature: params.llm.temperature,
+      prContextMarkdown: params.prContextMarkdown,
+      log: params.log,
+      maxTurns: params.maxSteps
+    })
+  }
+
   const tools = createRepoTools(params.repoRoot)
   const toolMap = new Map<string, any>(tools.map((t: any) => [t.name as string, t]))
 
@@ -85,17 +101,14 @@ export async function runDocsUpdateAgent(params: {
 
   for (let step = 0; step < maxSteps; step++) {
     const ai: AIMessage = await boundModel.invoke(messages)
-    const toolCalls = extractToolCalls(ai)
-
-    params.log?.(`[agent] step=${step + 1} toolCalls=${toolCalls.length}`)
     const content = msgText(ai).trim()
-    if (content) params.log?.(`[agent] ${content}`)
 
+    const toolCalls = extractToolCalls(ai)
+    params.log?.(`[agent] step=${step + 1} toolCalls=${toolCalls.length}`)
+    if (content) params.log?.(`[agent] ${content}`)
     messages.push(ai)
 
-    if (toolCalls.length === 0) {
-      return { summary: content }
-    }
+    if (toolCalls.length === 0) return { summary: content }
 
     for (const call of toolCalls) {
       const tool = toolMap.get(call.name) as any
@@ -109,7 +122,6 @@ export async function runDocsUpdateAgent(params: {
         params.log?.(`[tool] ${call.name} ${JSON.stringify(args).slice(0, 500)}`)
         const res = await tool.invoke(args as any)
         const out = typeof res === "string" ? res : JSON.stringify(res)
-        // ToolMessage content should be a string; keep it bounded.
         messages.push(new ToolMessage(out.slice(0, 50_000), id))
       } catch (e: any) {
         messages.push(new ToolMessage(`ERROR: ${String(e?.message ?? e)}`, id))
