@@ -9,6 +9,41 @@ import {
 
 import { createRepoTools } from "./repo-tools.js"
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+function getErrorStatus(err: any): number | undefined {
+  if (!err) return undefined
+  const status = err.status ?? err.statusCode ?? err.code
+  if (typeof status === "number") return status
+  if (typeof status === "string") {
+    const n = Number(status)
+    if (Number.isFinite(n)) return n
+  }
+  const msg = String(err.message ?? "")
+  const m = msg.match(/\b(429|500|502|503|504)\b/)
+  return m ? Number(m[1]) : undefined
+}
+
+function shouldRetry(err: any) {
+  const status = getErrorStatus(err)
+  if (!status) return false
+  if (status === 429) return true
+  if (status >= 500 && status <= 504) return true
+  return false
+}
+
+function retryDelayMs(attempt: number) {
+  const base = Number(process.env.GEMINI_RETRY_BASE_MS ?? "2000")
+  const max = Number(process.env.GEMINI_RETRY_MAX_MS ?? "60000")
+  const pow = Math.min(10, Math.max(0, attempt))
+  const exp = base * Math.pow(2, pow)
+  const jitter = Math.floor(Math.random() * 500)
+  const ms = Math.min(max, exp) + jitter
+  return Number.isFinite(ms) ? ms : 2000
+}
+
 function extractText(resp: EnhancedGenerateContentResponse): string {
   try {
     const t = resp.text()
@@ -172,12 +207,25 @@ export async function runGeminiDocsUpdateAgent(params: {
   const maxTurns = Math.max(1, Math.min(params.maxTurns ?? 20, 60))
   for (let turn = 0; turn < maxTurns; turn++) {
     params.log?.(`[agent] turn=${turn + 1}`)
-    const result = await model.generateContent({
-      contents,
-      generationConfig: {
-        temperature: params.temperature ?? 1.0
+    const maxRetries = Math.max(0, Math.min(Number(process.env.GEMINI_MAX_RETRIES ?? "6"), 20))
+    let result: any
+    for (let attempt = 0; ; attempt++) {
+      try {
+        result = await model.generateContent({
+          contents,
+          generationConfig: {
+            temperature: params.temperature ?? 1.0
+          }
+        } as any)
+        break
+      } catch (e: any) {
+        if (!shouldRetry(e) || attempt >= maxRetries) throw e
+        const ms = retryDelayMs(attempt)
+        const status = getErrorStatus(e)
+        params.log?.(`[gemini] retryable error${status ? ` ${status}` : ""}; sleeping ${ms}ms (attempt ${attempt + 1}/${maxRetries})`)
+        await sleep(ms)
       }
-    } as any)
+    }
 
     const resp = result.response
     const candidateContent = resp.candidates?.[0]?.content
