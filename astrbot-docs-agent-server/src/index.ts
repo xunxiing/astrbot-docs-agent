@@ -275,7 +275,7 @@ async function processPullRequest(repoFull: string, prNumber: number) {
     docsRepo: docsName,
     head: branch,
     base: baseBranch,
-    title: `Docs: ${repoFull}#${prNumber}`,
+    title: (runRes as any).docsPrTitle ? String((runRes as any).docsPrTitle) : `Docs: ${repoFull}#${prNumber}`,
     body: [
       "由 astrbot-docs-agent-server 自动生成。",
       "",

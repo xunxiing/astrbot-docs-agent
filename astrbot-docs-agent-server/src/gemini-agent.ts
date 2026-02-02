@@ -163,8 +163,11 @@ export async function runGeminiDocsUpdateAgent(params: {
     "- Allowed to write: *.md/*.mdx and VitePress config under .vitepress/ (js/mjs/ts/json).",
     "- Do NOT modify CI, workflows, dependencies, or unrelated code.",
     "- Avoid guessing. If info is missing, add TODO/NOTE in docs instead of inventing.",
+    "- IMPORTANT i18n: if you change or add a user-facing doc page, update BOTH zh/ and en/ versions (or add TODO notes in both languages).",
+    "- Keep docs meaningful: DO NOT add generic/obvious sections that do not help users (e.g. redundant 'result feedback' sections).",
+    "- Prefer concise, actionable content aligned with existing docs style.",
     "- Use function calling tools to read/list/write files and make changes in the repo.",
-    "- When finished, respond with a concise Markdown summary (bullets)."
+    "- When finished, respond with a concise Markdown summary in Chinese (bullets)."
   ].join("\n")
 
   const genAI = new GoogleGenerativeAI(params.apiKey)

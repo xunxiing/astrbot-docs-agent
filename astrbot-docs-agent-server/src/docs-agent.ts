@@ -3,6 +3,8 @@ import path from "node:path"
 import { run } from "./process.js"
 import { runDocsUpdateAgent } from "./langchain-agent.js"
 import type { LlmConfig } from "./llm.js"
+import { createChatModel } from "./llm.js"
+import { HumanMessage, SystemMessage } from "@langchain/core/messages"
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
@@ -72,6 +74,70 @@ async function runGit(args: string[], opts: { cwd?: string; timeoutMs: number })
     last = await run("git", args, { cwd: opts.cwd, timeoutMs: opts.timeoutMs, env: proxyEnv() })
   }
   return last
+}
+
+function parseJsonObject(text: string): any | undefined {
+  const t = (text ?? "").trim()
+  try {
+    return JSON.parse(t)
+  } catch {
+    const start = t.indexOf("{")
+    const end = t.lastIndexOf("}")
+    if (start >= 0 && end > start) {
+      const slice = t.slice(start, end + 1)
+      try {
+        return JSON.parse(slice)
+      } catch {
+        return undefined
+      }
+    }
+    return undefined
+  }
+}
+
+async function generateDocsPrMeta(params: {
+  llm: LlmConfig
+  upstreamRepo: string
+  upstreamPrNumber: number
+  upstreamPrTitle: string
+  changedFiles: string[]
+  rawAgentSummary: string
+}) {
+  const model = createChatModel(params.llm)
+  const sys = new SystemMessage(
+    [
+      "你是一个严谨的文档维护者。",
+      "请为“文档更新 PR”生成中文标题与中文改动摘要。",
+      "",
+      "要求：",
+      "- 输出必须是严格 JSON（不要 markdown，不要多余文字）。",
+      "- title：一行中文标题，<= 60 字，描述文档更新主题。",
+      "- summary：中文要点列表（用 \\n- ... 形式），内容聚焦用户可见变更与文档位置；不要总结无意义的背景段落。",
+      "- 如果新增了页面且涉及导航/侧边栏，请在 summary 中提到。",
+      "- 如果存在 i18n（zh/en）对应更新，请在 summary 中提到；若缺失请写 TODO。"
+    ].join("\n")
+  )
+  const user = new HumanMessage(
+    [
+      `上游仓库：${params.upstreamRepo}`,
+      `上游 PR：#${params.upstreamPrNumber}`,
+      `上游 PR 标题：${params.upstreamPrTitle}`,
+      "",
+      "本次文档仓库改动文件：",
+      ...(params.changedFiles.length ? params.changedFiles.map((f) => `- ${f}`) : ["- (none)"]),
+      "",
+      "Agent 原始摘要（可能为英文）：",
+      params.rawAgentSummary || "(empty)",
+      "",
+      '请输出 JSON，例如：{"title":"...","summary":"- ...\\n- ..."}'
+    ].join("\n")
+  )
+  const resp: any = await (model as any).invoke([sys, user])
+  const content = typeof resp?.content === "string" ? resp.content : String(resp?.content ?? "")
+  const obj = parseJsonObject(content) ?? {}
+  const title = typeof obj.title === "string" ? obj.title.trim() : ""
+  const summary = typeof obj.summary === "string" ? obj.summary.trim() : ""
+  return { title, summary }
 }
 
 function parseRepo(full: string): { owner: string; repo: string } {
@@ -200,11 +266,27 @@ export async function generateDocsForPr(params: {
   const changedPaths = parsePorcelainPaths(status.stdout)
   const changedDocs = changedPaths.some((p) => p.endsWith(".md") || p.endsWith(".mdx"))
 
+  const changedFilesRes = await runGit(["diff", "--name-only"], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
+  const changedFiles = (changedFilesRes.stdout || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+
+  const meta = await generateDocsPrMeta({
+    llm: params.llm,
+    upstreamRepo: params.codeRepo,
+    upstreamPrNumber: params.prNumber,
+    upstreamPrTitle: params.prTitle,
+    changedFiles,
+    rawAgentSummary: (agentRes.summary ?? "").trim()
+  }).catch(() => ({ title: "", summary: "" }))
+
   return {
     checkoutDir,
     workRoot,
     changed: changedDocs,
-    summary: (agentRes.summary ?? "").trim()
+    summary: (meta.summary || agentRes.summary || "").trim(),
+    docsPrTitle: meta.title || ""
   }
 }
 

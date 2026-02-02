@@ -76,8 +76,11 @@ export async function runDocsUpdateAgent(params: {
       "- Allowed to write: *.md/*.mdx and VitePress config under .vitepress/ (js/mjs/ts/json).",
       "- Do NOT modify CI, workflows, dependencies, or unrelated code.",
       "- Avoid guessing. If info is missing, add TODO/NOTE in docs instead of inventing.",
+      "- IMPORTANT i18n: if you change or add a user-facing doc page, update BOTH zh/ and en/ versions (or add TODO notes in both languages).",
+      "- Keep docs meaningful: DO NOT add generic/obvious sections that do not help users (e.g. redundant '结果反馈' or verbose theory).",
+      "- Prefer concise, actionable content aligned with existing docs style.",
       "- Use the provided tools to read/list/write files and make changes in the repo.",
-      "- When finished, reply with a concise Markdown summary of what you changed (bullets)."
+      "- When finished, reply with a concise Markdown summary in Chinese (bullets)."
     ].join("\n")
   )
 
