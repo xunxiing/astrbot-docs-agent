@@ -1,6 +1,5 @@
 services:
   astrbot-docs-agent:
-    # 默认使用 CI 推送到 Docker Hub 的镜像；也可以改成你自己的镜像名
     image: ${IMAGE:-xunxiing/astrbot-docs-agent-server:latest}
     container_name: astrbot-docs-agent
     restart: unless-stopped
@@ -8,13 +7,14 @@ services:
     env_file:
       - .env
     ports:
-      # HOST_PORT 是宿主机端口；PORT 是容器内服务监听端口（默认 8787）
       - "${HOST_PORT:-8787}:${PORT:-8787}"
     volumes:
-      # 用于缓存临时 git clone / 产物（建议用 volume，避免权限/路径问题）
       - astrbot-docs-agent-data:/data
-      # 可选：挂载 GitHub App 私钥文件
       - ./secrets:/secrets:ro
+    extra_hosts:
+      # Allow reaching the host proxy from inside the container (Docker 20.10+)
+      - "host.docker.internal:host-gateway"
 
 volumes:
   astrbot-docs-agent-data:
+

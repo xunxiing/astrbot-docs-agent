@@ -7,6 +7,22 @@ import { commitAndPushDocsBranch, generateDocsForPr } from "./docs-agent.js"
 
 const log = createLogger(env.logLevel as any)
 
+// Apply proxy env (mainly for `git clone/fetch/push` inside Docker)
+if (env.proxyUrl) {
+  const p = env.proxyUrl
+  process.env.HTTP_PROXY ??= p
+  process.env.HTTPS_PROXY ??= p
+  process.env.ALL_PROXY ??= p
+  process.env.http_proxy ??= p
+  process.env.https_proxy ??= p
+  process.env.all_proxy ??= p
+  if (env.noProxy) {
+    process.env.NO_PROXY ??= env.noProxy
+    process.env.no_proxy ??= env.noProxy
+  }
+  log.info("Proxy enabled", { proxyUrl: p, noProxy: env.noProxy })
+}
+
 type Job = { key: string; startedAt?: number; run: () => Promise<void> }
 
 const pending = new Map<string, Job>()

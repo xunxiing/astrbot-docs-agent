@@ -68,6 +68,18 @@ export const env = {
   // Debug: stream agent steps + tool calls into server logs (can be noisy).
   logAgent: optional("LOG_AGENT") === "1" || optional("LOG_AGENT") === "true",
 
+  // Optional outbound proxy (useful for git clone/push from within Docker in CN networks).
+  // Recommended for Docker Desktop: http://host.docker.internal:<port>
+  proxyUrl:
+    optional("PROXY_URL") ??
+    optional("HTTP_PROXY") ??
+    optional("http_proxy") ??
+    optional("HTTPS_PROXY") ??
+    optional("https_proxy") ??
+    optional("ALL_PROXY") ??
+    optional("all_proxy"),
+  noProxy: optional("NO_PROXY") ?? optional("no_proxy"),
+
   dataDir: optional("DATA_DIR") ?? "/data",
 
   // Controls to prevent VPS overload
