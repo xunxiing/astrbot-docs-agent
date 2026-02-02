@@ -1,6 +1,8 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
+import { mkdir, stat } from "node:fs/promises"
 import path from "node:path"
 import { run } from "./process.js"
+import { runDocsUpdateAgent } from "./langchain-agent.js"
+import type { LlmConfig } from "./llm.js"
 
 function parseRepo(full: string): { owner: string; repo: string } {
   const [owner, repo] = full.split("/", 2)
@@ -10,6 +12,20 @@ function parseRepo(full: string): { owner: string; repo: string } {
 
 function toAuthGitUrl(token: string, repoFull: string) {
   return `https://x-access-token:${token}@github.com/${repoFull}.git`
+}
+
+function parsePorcelainPaths(stdout: string): string[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      // porcelain v1: XY <path> (rename: XY old -> new)
+      const parts = l.split(/\s+/)
+      const p = parts.slice(1).join(" ")
+      return p.includes("->") ? p.split("->").pop()!.trim() : p.trim()
+    })
+    .filter(Boolean)
 }
 
 export async function generateDocsForPr(params: {
@@ -26,25 +42,14 @@ export async function generateDocsForPr(params: {
   prPatch: string
   dataDir: string
   timeoutMs: number
-  logOpencode?: boolean
-  opencode: {
-    baseUrl: string
-    apiKey: string
-    providerId: string
-    modelRaw: string
-    apiUrl?: string
-    variant: string
-  }
+  logAgent?: boolean
+  llm: LlmConfig
 }) {
   const { owner: docsOwner, repo: docsName } = parseRepo(params.docsRepo)
   const workRoot = path.join(params.dataDir, "runs", `${docsOwner}-${docsName}`, `pr-${params.prNumber}`)
-
   await mkdir(workRoot, { recursive: true })
 
   const checkoutDir = path.join(workRoot, "docs")
-  // Keep the previous checkout dir if it exists; this allows re-runs without re-downloading everything.
-  // We still reset git to the correct branch below.
-
   const cloneUrl = toAuthGitUrl(params.docsToken, params.docsRepo)
 
   const isDir = await stat(checkoutDir)
@@ -66,7 +71,7 @@ export async function generateDocsForPr(params: {
     if (clone.code !== 0) throw new Error(`git clone failed: ${clone.stderr || clone.stdout}`)
   }
 
-  // Ensure we're on the correct base branch BEFORE running opencode (otherwise later reset/checkout would drop changes).
+  // Ensure we're on the correct base branch BEFORE running the agent.
   const fetchBase = await run("git", ["fetch", "origin", params.baseBranch], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (fetchBase.code !== 0) throw new Error(`git fetch failed: ${fetchBase.stderr || fetchBase.stdout}`)
 
@@ -76,14 +81,13 @@ export async function generateDocsForPr(params: {
   const resetBase = await run("git", ["reset", "--hard", `origin/${params.baseBranch}`], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (resetBase.code !== 0) throw new Error(`git reset failed: ${resetBase.stderr || resetBase.stdout}`)
 
-  // Remove untracked artifacts from previous runs (eg .opencode/, opencode.json, logs, etc).
   const clean = await run("git", ["clean", "-fdx"], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (clean.code !== 0) throw new Error(`git clean failed: ${clean.stderr || clean.stdout}`)
 
   const checkoutBranch = await run("git", ["checkout", "-B", params.branch], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (checkoutBranch.code !== 0) throw new Error(`git checkout -B failed: ${checkoutBranch.stderr || checkoutBranch.stdout}`)
 
-  const contextMd = [
+  const prContextMarkdown = [
     "# PR Context",
     "",
     `- Repo: ${params.codeRepo}`,
@@ -108,141 +112,30 @@ export async function generateDocsForPr(params: {
     ""
   ].join("\n")
 
-  // Keep context/config inside the repo worktree to avoid OpenCode permission prompts for external directories.
-  // These files are untracked and will not be committed (commit step explicitly unstages runtime artifacts).
-  const opencodeDir = path.join(checkoutDir, ".opencode")
-  await mkdir(opencodeDir, { recursive: true })
-
-  const prContextPath = path.join(opencodeDir, "pr_context.md")
-  await writeFile(prContextPath, contextMd, "utf-8")
-  const summaryPath = "/tmp/docs_update_summary.md"
-  await writeFile(summaryPath, "", "utf-8").catch(() => undefined)
-
-  const resolveModel = () => {
-    const raw = params.opencode.modelRaw.trim()
-    if (raw.includes("/")) {
-      const [providerId, modelId] = raw.split("/", 2)
-      if (!providerId || !modelId) throw new Error(`Invalid OPENCODE_MODEL: "${raw}" (expected provider/model)`)
-      return { providerId, modelId }
-    }
-    // Treat as model id
-    return { providerId: params.opencode.providerId, modelId: raw }
-  }
-
-  const { providerId, modelId } = resolveModel()
-
-  const baseUrlNormalized = params.opencode.baseUrl.trim().replace(/\/$/, "")
-  const apiUrl = (params.opencode.apiUrl && params.opencode.apiUrl.trim()) || undefined
-
-  // Write an external config file (outside the git repo) and load via OPENCODE_CONFIG.
-  // This avoids committing opencode runtime files into the docs repo.
-  const runtimeOpencodeConfig = {
-    $schema: "https://opencode.ai/config.json",
-    provider: {
-      [providerId]: {
-        npm: "@ai-sdk/openai-compatible",
-        name: providerId,
-        options: {
-          baseURL: baseUrlNormalized,
-          apiKey: "{env:MY_API_KEY}"
-        },
-        models: {
-          [modelId]: { name: modelId }
+  const agentRes = await runDocsUpdateAgent({
+    repoRoot: checkoutDir,
+    llm: params.llm,
+    prContextMarkdown,
+    maxSteps: 24,
+    ...(params.logAgent
+      ? {
+          log: (line: string) => console.log(line)
         }
-      }
-    },
-    model: `${providerId}/${modelId}`
-  }
-
-  if (apiUrl) {
-    // @ts-expect-error - optional field supported by opencode config schema (Provider.api)
-    runtimeOpencodeConfig.provider[providerId].api = apiUrl
-  }
-
-  const opencodeConfigPath = path.join(opencodeDir, "opencode.runtime.json")
-  await writeFile(opencodeConfigPath, JSON.stringify(runtimeOpencodeConfig, null, 2), "utf-8")
-
-  const prompt = [
-    "你是一个严谨的文档维护者。",
-    "",
-    "你将收到一份来自代码仓库 PR 的上下文（标题、描述、改动文件列表、diff 截断）。",
-    "请在当前文档仓库中：",
-    "1) 找到最合适的文档位置并更新（或新增）Markdown 文档来覆盖此次 PR 的用户可见变更。",
-    "2) 如果仓库存在 changelog / release notes / 版本记录，请补充一条对应内容。",
-    "3) 避免臆测：仅根据上下文与仓库现有内容输出；若信息不足，请在文档中注明 TODO/待确认点，而不是编造。",
-    "4) 只修改文档仓库内的文档内容（例如 *.md/*.mdx），不要改 CI、脚本、依赖。",
-    "5) 不要创建占位文件（例如 `docs.md`、`content.md`），也不要改动任何 CI/脚本/依赖配置。",
-    "",
-    "输出以“直接修改文件”的方式完成（在仓库里落地改动），不要只给建议。"
-  ].join("\n")
-
-  const prefixer = (prefix: string) => {
-    let buffer = ""
-    return (chunk: string) => {
-      buffer += chunk
-      const parts = buffer.split(/\r?\n/)
-      buffer = parts.pop() ?? ""
-      for (const line of parts) console.log(`${prefix}${line}`)
-    }
-  }
-
-  // Keep OpenCode's XDG storage inside the repo checkout to avoid interactive `external_directory` prompts.
-  const opencodeHome = path.join(opencodeDir, "home")
-  const xdgDataHome = path.join(opencodeHome, ".local", "share")
-  const xdgCacheHome = path.join(opencodeHome, ".cache")
-  const xdgConfigHome = path.join(opencodeHome, ".config")
-  const xdgStateHome = path.join(opencodeHome, ".local", "state")
-  await mkdir(xdgDataHome, { recursive: true })
-  await mkdir(xdgCacheHome, { recursive: true })
-  await mkdir(xdgConfigHome, { recursive: true })
-  await mkdir(xdgStateHome, { recursive: true })
-
-  const opencodeRun = await run(
-    "opencode",
-    // yargs 的 `--file/-f` 是 array，会吞掉后续参数；用 `--` 把 prompt 强制放到 args["--"] 里
-    ["run", "--model", `${providerId}/${modelId}`, "--variant", params.opencode.variant, "-f", prContextPath, "--", prompt],
-    {
-      cwd: checkoutDir,
-      timeoutMs: params.timeoutMs,
-      env: {
-        MY_API_KEY: params.opencode.apiKey,
-        OPENCODE_BASE_URL: baseUrlNormalized,
-        OPENCODE_CONFIG: opencodeConfigPath,
-        OPENCODE_DISABLE_PROJECT_CONFIG: "true",
-        HOME: opencodeHome,
-        XDG_DATA_HOME: xdgDataHome,
-        XDG_CACHE_HOME: xdgCacheHome,
-        XDG_CONFIG_HOME: xdgConfigHome,
-        XDG_STATE_HOME: xdgStateHome,
-        // Allow OpenCode to write the summary file to /tmp without blocking on an interactive permission prompt.
-        OPENCODE_PERMISSION: JSON.stringify({ external_directory: { "/tmp*": "allow" } })
-      },
-      ...(params.logOpencode
-        ? {
-            onStdout: prefixer("[opencode] "),
-            onStderr: prefixer("[opencode:err] ")
-          }
-        : {})
-    }
-  )
-  if (opencodeRun.code !== 0) throw new Error(`opencode failed: ${opencodeRun.stderr || opencodeRun.stdout}`)
+      : {})
+  })
 
   const status = await run("git", ["status", "--porcelain=v1"], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (status.code !== 0) throw new Error(`git status failed: ${status.stderr}`)
 
-  const changed = status.stdout
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .some((l) => {
-      // porcelain: XY <path> (also handles rename: XY old -> new)
-      const parts = l.split(/\s+/)
-      const p = parts.slice(1).join(" ")
-      const pathPart = p.includes("->") ? p.split("->").pop()!.trim() : p.trim()
-      return pathPart.endsWith(".md") || pathPart.endsWith(".mdx")
-    })
-  const summary = await readFile(summaryPath, "utf-8").catch(() => "")
-  return { checkoutDir, workRoot, changed, summary: summary.trim() }
+  const changedPaths = parsePorcelainPaths(status.stdout)
+  const changedDocs = changedPaths.some((p) => p.endsWith(".md") || p.endsWith(".mdx"))
+
+  return {
+    checkoutDir,
+    workRoot,
+    changed: changedDocs,
+    summary: (agentRes.summary ?? "").trim()
+  }
 }
 
 export async function commitAndPushDocsBranch(params: {
@@ -260,43 +153,32 @@ export async function commitAndPushDocsBranch(params: {
     timeoutMs: params.timeoutMs
   })
   if (setUser.code !== 0) throw new Error(setUser.stderr)
+
   const setEmail = await run("git", ["config", "user.email", "astrbot-docs-agent[bot]@users.noreply.github.com"], {
     cwd: params.checkoutDir,
     timeoutMs: params.timeoutMs
   })
   if (setEmail.code !== 0) throw new Error(setEmail.stderr)
 
-  // Ensure origin uses token
   const setOrigin = await run("git", ["remote", "set-url", "origin", originUrl], {
     cwd: params.checkoutDir,
     timeoutMs: params.timeoutMs
   })
   if (setOrigin.code !== 0) throw new Error(setOrigin.stderr)
 
-  // Stage everything first, then unstage known runtime/garbage files.
-  // (Using pathspec globs like "*.mdx" can fail when there are no matches.)
   const add = await run("git", ["add", "-A"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
-  if (add.code !== 0) throw new Error(add.stderr)
-
-  // Safety: never include opencode runtime files even if they exist in the docs repo.
-  await run("git", ["reset", "--", "opencode.json", ".opencode", "content.md"], {
-    cwd: params.checkoutDir,
-    timeoutMs: params.timeoutMs
-  })
-  // Also revert them in the working tree to avoid leaving the checkout dirty (ignore errors if paths don't exist).
-  await run("git", ["checkout", "--", "opencode.json", ".opencode", "content.md"], {
-    cwd: params.checkoutDir,
-    timeoutMs: params.timeoutMs
-  }).catch(() => undefined)
+  if (add.code !== 0) throw new Error(add.stderr || add.stdout)
 
   const staged = await run("git", ["diff", "--cached", "--name-only"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (staged.code !== 0) throw new Error(staged.stderr || staged.stdout)
+
   const stagedPaths = staged.stdout
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
+
   const stagedDocPaths = stagedPaths.filter((p) => p.endsWith(".md") || p.endsWith(".mdx"))
-  if (stagedDocPaths.length === 0) throw new Error("No staged docs changes (only non-doc files changed after cleanup).")
+  if (stagedDocPaths.length === 0) throw new Error("No staged docs changes (only non-doc files changed).")
 
   const commit = await run("git", ["commit", "-m", params.commitMessage], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
   if (commit.code !== 0) throw new Error(commit.stderr || commit.stdout)
@@ -305,5 +187,6 @@ export async function commitAndPushDocsBranch(params: {
     cwd: params.checkoutDir,
     timeoutMs: params.timeoutMs
   })
-  if (push.code !== 0) throw new Error(push.stderr)
+  if (push.code !== 0) throw new Error(push.stderr || push.stdout)
 }
+

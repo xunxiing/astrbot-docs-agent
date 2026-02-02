@@ -34,20 +34,34 @@ export const env = {
   })(),
   docsRepo: required("DOCS_REPO"),
 
-  opencodeBaseUrl: required("OPENCODE_BASE_URL"),
-  myApiKey: required("MY_API_KEY"),
-  // OpenCode model resolution:
-  // - If OPENCODE_MODEL contains "/", it's treated as provider/model
-  // - If OPENCODE_MODEL has no "/", it's treated as model id and combined with OPENCODE_PROVIDER_ID
-  opencodeProviderId: optional("OPENCODE_PROVIDER_ID") ?? "my-thirdparty",
-  opencodeModelRaw: optional("OPENCODE_MODEL") ?? "my-model",
-  // Optional: override the full OpenAI-compatible chat/completions URL if your provider doesn't follow /v1.
-  // Example: https://api.xxx.com/v1/chat/completions
-  opencodeApiUrl: optional("OPENCODE_API_URL"),
-  // OpenCode run variant. Use "minimal" to avoid providers that require reasoning_content when thinking is enabled.
-  opencodeVariant: optional("OPENCODE_VARIANT") ?? "minimal",
-  // Debug: stream opencode stdout/stderr into server logs (can be noisy).
-  logOpencode: optional("LOG_OPENCODE") === "1" || optional("LOG_OPENCODE") === "true",
+  // LLM provider: "openai-compatible" (default) or "gemini"
+  llmProvider: (optional("LLM_PROVIDER") ?? "openai-compatible") as "openai-compatible" | "gemini",
+  llmApiKey: (() => {
+    // Back-compat: MY_API_KEY was previously used for OpenCode. Keep it working.
+    const v = optional("LLM_API_KEY") ?? optional("MY_API_KEY") ?? optional("GEMINI_API_KEY")
+    if (!v) throw new Error("Missing env: LLM_API_KEY (or MY_API_KEY / GEMINI_API_KEY)")
+    return v
+  })(),
+  llmBaseUrl: (optional("OPENAI_BASE_URL") ?? optional("LLM_BASE_URL") ?? optional("OPENCODE_BASE_URL") ?? "https://api.openai.com/v1")
+    .trim()
+    .replace(/\/$/, ""),
+  llmModel: (() => {
+    const provider = (optional("LLM_PROVIDER") ?? "openai-compatible") as "openai-compatible" | "gemini"
+    const raw =
+      optional("LLM_MODEL") ??
+      (provider === "gemini" ? optional("GEMINI_MODEL") : optional("OPENAI_MODEL")) ??
+      optional("OPENCODE_MODEL") ??
+      (provider === "gemini" ? "gemini-1.5-pro" : "gpt-4o-mini")
+    const trimmed = (raw ?? "").trim()
+    // Back-compat: OPENCODE_MODEL may be "provider/model" – keep only the model id.
+    return trimmed.includes("/") ? trimmed.split("/").pop()! : trimmed
+  })(),
+  llmTemperature: (() => {
+    const n = Number(optional("LLM_TEMPERATURE") ?? "0.2")
+    return Number.isFinite(n) ? n : 0.2
+  })(),
+  // Debug: stream agent steps + tool calls into server logs (can be noisy).
+  logAgent: optional("LOG_AGENT") === "1" || optional("LOG_AGENT") === "true",
 
   dataDir: optional("DATA_DIR") ?? "/data",
 

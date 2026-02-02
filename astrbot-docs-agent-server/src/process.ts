@@ -2,8 +2,7 @@ import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 
 const FALLBACK_BIN: Record<string, string[]> = {
-  git: ["/usr/bin/git", "/bin/git"],
-  opencode: ["/usr/local/bin/opencode", "/usr/bin/opencode", "/bin/opencode"],
+  git: ["/usr/bin/git", "/bin/git"]
 }
 
 export async function run(
@@ -17,7 +16,7 @@ export async function run(
     onStderr?: (chunk: string) => void
     /**
      * Keep at most this many characters of stdout/stderr in memory (tail).
-     * This prevents large subprocess outputs (e.g. opencode) from exhausting memory.
+     * This prevents large subprocess outputs from exhausting memory.
      *
      * Can be overridden via env `PROCESS_MAX_CAPTURE_CHARS` (default 200000).
      */

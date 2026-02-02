@@ -210,14 +210,13 @@ async function processPullRequest(repoFull: string, prNumber: number) {
     prPatch: patch,
     dataDir: env.dataDir,
     timeoutMs,
-    logOpencode: env.logOpencode || env.logLevel === "debug",
-    opencode: {
-      baseUrl: env.opencodeBaseUrl,
-      apiKey: env.myApiKey,
-      providerId: env.opencodeProviderId,
-      modelRaw: env.opencodeModelRaw,
-      apiUrl: env.opencodeApiUrl,
-      variant: env.opencodeVariant
+    logAgent: env.logAgent || env.logLevel === "debug",
+    llm: {
+      provider: env.llmProvider,
+      apiKey: env.llmApiKey,
+      model: env.llmModel,
+      baseUrl: env.llmProvider === "openai-compatible" ? env.llmBaseUrl : undefined,
+      temperature: env.llmTemperature
     }
   })
 
