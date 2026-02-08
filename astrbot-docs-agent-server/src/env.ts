@@ -33,6 +33,7 @@ export const env = {
       .filter(Boolean)
   })(),
   docsRepo: required("DOCS_REPO"),
+  botMention: optional("BOT_MENTION") ?? "AstrBot-Doc-Agent",
 
   // LLM provider: "openai-compatible" (default) or "gemini"
   llmProvider: (optional("LLM_PROVIDER") ?? "openai-compatible") as "openai-compatible" | "gemini",

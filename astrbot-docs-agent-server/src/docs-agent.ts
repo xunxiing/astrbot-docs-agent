@@ -176,6 +176,8 @@ export async function generateDocsForPr(params: {
   prUrl: string
   prFiles: string[]
   prPatch: string
+  manualInstruction?: string
+  triggerSource?: "pr_merged" | "pr_comment"
   dataDir: string
   timeoutMs: number
   logAgent?: boolean
@@ -226,6 +228,7 @@ export async function generateDocsForPr(params: {
   const prContextMarkdown = [
     "# PR Context",
     "",
+    `- Trigger source: ${params.triggerSource ?? "pr_merged"}`,
     `- Repo: ${params.codeRepo}`,
     `- PR: #${params.prNumber}`,
     "",
@@ -245,6 +248,9 @@ export async function generateDocsForPr(params: {
     "```diff",
     params.prPatch ?? "",
     "```",
+    "",
+    "## Manual Instruction",
+    params.manualInstruction?.trim() ? params.manualInstruction.trim() : "(none)",
     ""
   ].join("\n")
 
