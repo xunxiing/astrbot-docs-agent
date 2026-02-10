@@ -31,6 +31,8 @@ Copy `.env.example` to `.env` and fill:
 - `CODE_REPO` (or `CODE_REPOS`)
 - `DOCS_REPO`
 - `BOT_MENTION` (optional, default: `AstrBot-Doc-Agent`)
+- `USE_PROXY` (optional, default: `true`; set `false` to disable proxy even if `HTTP_PROXY` exists)
+- `WEBHOOK_BODY_LIMIT` (optional, default: `10mb`; increase if webhook payload is too large)
 - LLM settings:
   - OpenAI-compatible: `LLM_PROVIDER=openai-compatible`, `LLM_API_KEY`, `LLM_MODEL`, `OPENAI_BASE_URL`
   - Gemini: `LLM_PROVIDER=gemini`, `GEMINI_API_KEY`, `GEMINI_MODEL`

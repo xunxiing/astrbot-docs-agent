@@ -5,6 +5,7 @@ import { runDocsUpdateAgent } from "./langchain-agent.js"
 import type { LlmConfig } from "./llm.js"
 import { createChatModel } from "./llm.js"
 import { HumanMessage, SystemMessage } from "@langchain/core/messages"
+import { env } from "./env.js"
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
@@ -40,6 +41,19 @@ function isRetryableGit(stderr: string, stdout: string) {
 }
 
 function proxyEnv(): NodeJS.ProcessEnv {
+  if (!env.useProxy) {
+    return {
+      HTTP_PROXY: "",
+      HTTPS_PROXY: "",
+      ALL_PROXY: "",
+      http_proxy: "",
+      https_proxy: "",
+      all_proxy: "",
+      NO_PROXY: "*",
+      no_proxy: "*"
+    }
+  }
+
   const p =
     process.env.PROXY_URL ||
     process.env.HTTP_PROXY ||
@@ -49,20 +63,20 @@ function proxyEnv(): NodeJS.ProcessEnv {
     process.env.ALL_PROXY ||
     process.env.all_proxy
   const np = process.env.NO_PROXY || process.env.no_proxy
-  const env: NodeJS.ProcessEnv = {}
+  const out: NodeJS.ProcessEnv = {}
   if (p) {
-    env.HTTP_PROXY = p
-    env.HTTPS_PROXY = p
-    env.ALL_PROXY = p
-    env.http_proxy = p
-    env.https_proxy = p
-    env.all_proxy = p
+    out.HTTP_PROXY = p
+    out.HTTPS_PROXY = p
+    out.ALL_PROXY = p
+    out.http_proxy = p
+    out.https_proxy = p
+    out.all_proxy = p
   }
   if (np) {
-    env.NO_PROXY = np
-    env.no_proxy = np
+    out.NO_PROXY = np
+    out.no_proxy = np
   }
-  return env
+  return out
 }
 
 async function runGit(args: string[], opts: { cwd?: string; timeoutMs: number }) {

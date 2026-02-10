@@ -7,8 +7,10 @@ import { commitAndPushDocsBranch, generateDocsForPr } from "./docs-agent.js"
 
 const log = createLogger(env.logLevel as any)
 
+const PROXY_ENV_KEYS = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NO_PROXY", "no_proxy"] as const
+
 // Apply proxy env (mainly for `git clone/fetch/push` inside Docker)
-if (env.proxyUrl) {
+if (env.useProxy && env.proxyUrl) {
   const p = env.proxyUrl
   process.env.HTTP_PROXY ??= p
   process.env.HTTPS_PROXY ??= p
@@ -21,6 +23,9 @@ if (env.proxyUrl) {
     process.env.no_proxy ??= env.noProxy
   }
   log.info("Proxy enabled", { proxyUrl: p, noProxy: env.noProxy })
+} else if (!env.useProxy) {
+  for (const k of PROXY_ENV_KEYS) delete process.env[k]
+  log.info("Proxy disabled by USE_PROXY=false")
 }
 
 const EXPERIMENTAL_NOTICE_LINES = [
@@ -129,7 +134,7 @@ function parseMentionInstruction(commentBody: string, botMention: string) {
   if (!hit) return { shouldTrigger: false as const }
 
   let tail = (commentBody || "").slice(hit.index + hit[0].length).trim()
-  tail = tail.replace(/^[\s:：,，;\-]+/, "").trim()
+  tail = tail.replace(/^[\s:\uFF1A,\uFF0C;\-]+/, "").trim()
   if (!tail) return { shouldTrigger: true as const, manualInstruction: undefined as string | undefined }
 
   const cmd = /^generate\s+docs\b/i.exec(tail)
@@ -426,7 +431,7 @@ app.get("/queue", (_req, res) => {
 // Keep raw body for signature verification
 app.post(
   "/webhooks/github",
-  express.raw({ type: "*/*" }),
+  express.raw({ type: "*/*", limit: env.webhookBodyLimit }),
   async (req, res) => {
     try {
       const id = req.header("x-github-delivery") ?? ""
@@ -448,11 +453,24 @@ app.post(
   }
 )
 
+
+app.use((err: any, _req: any, res: any, next: any) => {
+  if (err?.type === "entity.too.large" || err?.name === "PayloadTooLargeError") {
+    log.warn("Webhook payload too large", { limit: env.webhookBodyLimit })
+    res.status(413).send("payload too large")
+    return
+  }
+  next(err)
+})
+
 app.listen(env.port, "0.0.0.0", () => {
   log.info(`Listening on :${env.port}`)
   log.info("Allowlisted code repos", {
     codeRepos: env.codeRepos,
     docsRepo: env.docsRepo,
-    botMention: env.botMention
+    botMention: env.botMention,
+    useProxy: env.useProxy,
+    webhookBodyLimit: env.webhookBodyLimit
   })
 })
+

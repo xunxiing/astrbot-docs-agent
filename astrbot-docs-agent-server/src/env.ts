@@ -11,6 +11,17 @@ function optional(name: string): string | undefined {
   return value && value.length > 0 ? value : undefined
 }
 
+function optionalBool(name: string, defaultValue: boolean): boolean {
+  const raw = optional(name)
+  if (!raw) return defaultValue
+  const v = raw.trim().toLowerCase()
+  if (["1", "true", "yes", "on"].includes(v)) return true
+  if (["0", "false", "no", "off"].includes(v)) return false
+  return defaultValue
+}
+
+const useProxy = optionalBool("USE_PROXY", true)
+
 export const env = {
   port: Number(optional("PORT") ?? "8787"),
   logLevel: optional("LOG_LEVEL") ?? "info",
@@ -34,6 +45,7 @@ export const env = {
   })(),
   docsRepo: required("DOCS_REPO"),
   botMention: optional("BOT_MENTION") ?? "AstrBot-Doc-Agent",
+  useProxy,
 
   // LLM provider: "openai-compatible" (default) or "gemini"
   llmProvider: (optional("LLM_PROVIDER") ?? "openai-compatible") as "openai-compatible" | "gemini",
@@ -59,7 +71,7 @@ export const env = {
       optional("OPENCODE_MODEL") ??
       (provider === "gemini" ? "gemini-1.5-pro" : "gpt-4o-mini")
     const trimmed = (raw ?? "").trim()
-    // Back-compat: OPENCODE_MODEL may be "provider/model" – keep only the model id.
+    // Back-compat: OPENCODE_MODEL may be "provider/model" - keep only the model id.
     return trimmed.includes("/") ? trimmed.split("/").pop()! : trimmed
   })(),
   llmTemperature: (() => {
@@ -71,15 +83,19 @@ export const env = {
 
   // Optional outbound proxy (useful for git clone/push from within Docker in CN networks).
   // Recommended for Docker Desktop: http://host.docker.internal:<port>
-  proxyUrl:
-    optional("PROXY_URL") ??
-    optional("HTTP_PROXY") ??
-    optional("http_proxy") ??
-    optional("HTTPS_PROXY") ??
-    optional("https_proxy") ??
-    optional("ALL_PROXY") ??
-    optional("all_proxy"),
-  noProxy: optional("NO_PROXY") ?? optional("no_proxy"),
+  proxyUrl: useProxy
+    ? optional("PROXY_URL") ??
+      optional("HTTP_PROXY") ??
+      optional("http_proxy") ??
+      optional("HTTPS_PROXY") ??
+      optional("https_proxy") ??
+      optional("ALL_PROXY") ??
+      optional("all_proxy")
+    : undefined,
+  noProxy: useProxy ? optional("NO_PROXY") ?? optional("no_proxy") : undefined,
+
+  // Max accepted GitHub webhook payload size for raw body parser.
+  webhookBodyLimit: optional("WEBHOOK_BODY_LIMIT") ?? "10mb",
 
   dataDir: optional("DATA_DIR") ?? "/data",
 
