@@ -34,6 +34,10 @@ export const env = {
   })(),
   githubWebhookSecret: required("GITHUB_WEBHOOK_SECRET"),
 
+  // Optional GitHub Personal Access Token for API-based operations (fallback for git operations)
+  // When set, the agent will use GitHub API instead of git fetch/clone when possible
+  githubToken: optional("GITHUB_TOKEN"),
+
   // One or more code repos that can trigger jobs.
   // Prefer CODE_REPOS="owner1/repo1,owner2/repo2" if you want multiple.
   codeRepos: (() => {

@@ -1,4 +1,4 @@
-import { mkdir, stat } from "node:fs/promises"
+import { mkdir, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { run } from "./process.js"
 import { runDocsUpdateAgent } from "./langchain-agent.js"
@@ -12,13 +12,13 @@ function sleep(ms: number) {
 }
 
 function gitRetryDelayMs(attempt: number) {
-  const base = Number(process.env.GIT_RETRY_BASE_MS ?? "1500")
-  const max = Number(process.env.GIT_RETRY_MAX_MS ?? "15000")
+  const base = Number(process.env.GIT_RETRY_BASE_MS ?? "2000") // Increased base delay
+  const max = Number(process.env.GIT_RETRY_MAX_MS ?? "30000") // Increased max delay
   const pow = Math.min(10, Math.max(0, attempt))
   const exp = base * Math.pow(2, pow)
-  const jitter = Math.floor(Math.random() * 400)
+  const jitter = Math.floor(Math.random() * 800) // Increased jitter
   const ms = Math.min(max, exp) + jitter
-  return Number.isFinite(ms) ? ms : 1500
+  return Number.isFinite(ms) ? ms : 2000
 }
 
 function isRetryableGit(stderr: string, stdout: string) {
@@ -80,10 +80,11 @@ function proxyEnv(): NodeJS.ProcessEnv {
 }
 
 async function runGit(args: string[], opts: { cwd?: string; timeoutMs: number }) {
-  const maxRetries = Math.max(0, Math.min(Number(process.env.GIT_MAX_RETRIES ?? "3"), 10))
+  const maxRetries = Math.max(0, Math.min(Number(process.env.GIT_MAX_RETRIES ?? "5"), 10)) // Increased max retries
   let last = await run("git", args, { cwd: opts.cwd, timeoutMs: opts.timeoutMs, env: proxyEnv() })
   for (let attempt = 0; attempt < maxRetries && last.code !== 0 && isRetryableGit(last.stderr, last.stdout); attempt++) {
     const ms = gitRetryDelayMs(attempt)
+    console.log(`Git command failed, retrying in ${ms}ms... (attempt ${attempt + 1}/${maxRetries})`)
     await sleep(ms)
     last = await run("git", args, { cwd: opts.cwd, timeoutMs: opts.timeoutMs, env: proxyEnv() })
   }
@@ -220,12 +221,22 @@ export async function generateDocsForPr(params: {
 
   if (!ensureRepoOk) {
     const clone = await runGit(["clone", "--depth=1", cloneUrl, checkoutDir], { timeoutMs: params.timeoutMs })
-    if (clone.code !== 0) throw new Error(`git clone failed: ${clone.stderr || clone.stdout}`)
+    if (clone.code !== 0) {
+      console.warn(`git clone failed: ${clone.stderr || clone.stdout}. This might be a network issue.`)
+      // We continue because we might be able to use GitHub API later if GITHUB_TOKEN is provided,
+      // but current implementation still relies on local git for agent tools.
+      throw new Error(`git clone failed: ${clone.stderr || clone.stdout}`)
+    }
   }
 
   // Ensure we're on the correct base branch BEFORE running the agent.
   const fetchBase = await runGit(["fetch", "origin", params.baseBranch], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
-  if (fetchBase.code !== 0) throw new Error(`git fetch failed: ${fetchBase.stderr || fetchBase.stdout}`)
+  if (fetchBase.code !== 0) {
+    console.warn(`git fetch failed: ${fetchBase.stderr || fetchBase.stdout}.`)
+    // If fetch fails and we have a GITHUB_TOKEN, we could potentially fallback,
+    // but the LangChain agent currently expects a local git repo to work with.
+    throw new Error(`git fetch failed: ${fetchBase.stderr || fetchBase.stdout}`)
+  }
 
   const checkoutBase = await runGit(["checkout", params.baseBranch], { cwd: checkoutDir, timeoutMs: params.timeoutMs })
   if (checkoutBase.code !== 0) throw new Error(`git checkout failed: ${checkoutBase.stderr || checkoutBase.stdout}`)
