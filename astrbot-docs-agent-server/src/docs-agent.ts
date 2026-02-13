@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises"
+import { mkdir, stat, writeFile, readFile } from "node:fs/promises"
 import path from "node:path"
 import { run } from "./process.js"
 import { runDocsUpdateAgent } from "./langchain-agent.js"
@@ -6,6 +6,8 @@ import type { LlmConfig } from "./llm.js"
 import { createChatModel } from "./llm.js"
 import { HumanMessage, SystemMessage } from "@langchain/core/messages"
 import { env } from "./env.js"
+import { commitFilesViaApi } from "./github.js"
+import { Octokit } from "@octokit/rest"
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
@@ -326,49 +328,86 @@ export async function commitAndPushDocsBranch(params: {
   docsToken: string
   checkoutDir: string
   branch: string
+  baseBranch: string
   commitMessage: string
   timeoutMs: number
+  octokit?: Octokit // Optional octokit for API fallback
 }) {
+  const { owner: docsOwner, repo: docsName } = parseRepo(params.docsRepo)
   const originUrl = toAuthGitUrl(params.docsToken, params.docsRepo)
 
-  const setUser = await runGit(["config", "user.name", "astrbot-docs-agent[bot]"], {
-    cwd: params.checkoutDir,
-    timeoutMs: params.timeoutMs
-  })
-  if (setUser.code !== 0) throw new Error(setUser.stderr)
+  try {
+    const setUser = await runGit(["config", "user.name", "astrbot-docs-agent[bot]"], {
+      cwd: params.checkoutDir,
+      timeoutMs: params.timeoutMs
+    })
+    if (setUser.code !== 0) throw new Error(setUser.stderr)
 
-  const setEmail = await runGit(["config", "user.email", "astrbot-docs-agent[bot]@users.noreply.github.com"], {
-    cwd: params.checkoutDir,
-    timeoutMs: params.timeoutMs
-  })
-  if (setEmail.code !== 0) throw new Error(setEmail.stderr)
+    const setEmail = await runGit(["config", "user.email", "astrbot-docs-agent[bot]@users.noreply.github.com"], {
+      cwd: params.checkoutDir,
+      timeoutMs: params.timeoutMs
+    })
+    if (setEmail.code !== 0) throw new Error(setEmail.stderr)
 
-  const setOrigin = await runGit(["remote", "set-url", "origin", originUrl], {
-    cwd: params.checkoutDir,
-    timeoutMs: params.timeoutMs
-  })
-  if (setOrigin.code !== 0) throw new Error(setOrigin.stderr)
+    const setOrigin = await runGit(["remote", "set-url", "origin", originUrl], {
+      cwd: params.checkoutDir,
+      timeoutMs: params.timeoutMs
+    })
+    if (setOrigin.code !== 0) throw new Error(setOrigin.stderr)
 
-  const add = await runGit(["add", "-A"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
-  if (add.code !== 0) throw new Error(add.stderr || add.stdout)
+    const add = await runGit(["add", "-A"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
+    if (add.code !== 0) throw new Error(add.stderr || add.stdout)
 
-  const staged = await runGit(["diff", "--cached", "--name-only"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
-  if (staged.code !== 0) throw new Error(staged.stderr || staged.stdout)
+    const staged = await runGit(["diff", "--cached", "--name-only"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
+    if (staged.code !== 0) throw new Error(staged.stderr || staged.stdout)
 
-  const stagedPaths = staged.stdout
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
+    const stagedPaths = staged.stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
 
-  const stagedDocPaths = stagedPaths.filter((p) => p.endsWith(".md") || p.endsWith(".mdx"))
-  if (stagedDocPaths.length === 0) throw new Error("No staged docs changes (only non-doc files changed).")
+    const stagedDocPaths = stagedPaths.filter((p) => p.endsWith(".md") || p.endsWith(".mdx"))
+    if (stagedDocPaths.length === 0) throw new Error("No staged docs changes (only non-doc files changed).")
 
-  const commit = await runGit(["commit", "-m", params.commitMessage], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
-  if (commit.code !== 0) throw new Error(commit.stderr || commit.stdout)
+    const commit = await runGit(["commit", "-m", params.commitMessage], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
+    if (commit.code !== 0) throw new Error(commit.stderr || commit.stdout)
 
-  const push = await runGit(["push", "--force", "--set-upstream", "origin", params.branch], {
-    cwd: params.checkoutDir,
-    timeoutMs: params.timeoutMs
-  })
-  if (push.code !== 0) throw new Error(push.stderr || push.stdout)
+    const push = await runGit(["push", "--force", "--set-upstream", "origin", params.branch], {
+      cwd: params.checkoutDir,
+      timeoutMs: params.timeoutMs
+    })
+    if (push.code !== 0) throw new Error(push.stderr || push.stdout)
+  } catch (err: any) {
+    if (params.octokit) {
+      console.warn(`Git push failed: ${err.message}. Falling back to GitHub API commit...`)
+      
+      // Get all changed files
+      const status = await runGit(["status", "--porcelain=v1"], { cwd: params.checkoutDir, timeoutMs: params.timeoutMs })
+      const changedPaths = parsePorcelainPaths(status.stdout)
+      
+      if (changedPaths.length === 0) {
+        throw new Error("No changes to commit via API fallback.")
+      }
+
+      const filesToCommit = await Promise.all(
+        changedPaths.map(async (p) => {
+          const content = await readFile(path.join(params.checkoutDir, p), "utf-8")
+          return { path: p, content }
+        })
+      )
+
+      await commitFilesViaApi({
+        octokit: params.octokit,
+        owner: docsOwner,
+        repo: docsName,
+        branch: params.branch,
+        baseBranch: params.baseBranch,
+        message: params.commitMessage,
+        files: filesToCommit
+      })
+      console.log(`Successfully committed changes via GitHub API for ${params.branch}`)
+    } else {
+      throw err
+    }
+  }
 }

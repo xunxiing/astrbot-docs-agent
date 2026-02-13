@@ -358,8 +358,10 @@ async function processPullRequest(repoFull: string, prNumber: number, trigger: T
     docsToken: docsInst.token,
     checkoutDir: runRes.checkoutDir,
     branch,
+    baseBranch,
     commitMessage: `docs: update for ${repoFull}#${prNumber}`,
-    timeoutMs
+    timeoutMs,
+    octokit: docsInst.octokit
   })
 
   const docsPrUrl = await ensureDocsPr({
